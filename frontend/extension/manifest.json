@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "FridgeMate Cart Helper",
+  "version": "0.1.0",
+  "description": "FridgeMate AI 장보기 리스트를 사용자의 실제 Chrome 에서 쿠팡 장바구니에 담아주는 도우미 (담기까지만, 결제 없음).",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": [
+    "https://www.coupang.com/*",
+    "https://*.coupang.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+      "js": ["content-fridgemate.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
