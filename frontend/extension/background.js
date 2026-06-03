@@ -9,6 +9,7 @@
 const NAV_TIMEOUT_MS = 20000;
 const CLICK_ATTEMPTS = 10; // 버튼이 렌더될 때까지 짧게 재시도
 const CLICK_GAP_MS = 350;
+const SETTLE_MS = 1500; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
 // 페이지 컨텍스트에서 실행: 장바구니 담기 버튼만 찾아 클릭.
@@ -18,10 +19,14 @@ function clickAddToCartInPage() {
     document.querySelectorAll("button, a, input[type=button], input[type=submit]")
   );
   const btn = els.find((el) => {
+    // 헤더의 '장바구니' 네비게이션 링크(담기 아님)는 제외 → cart.coupang.com 으로 가는 링크 배제.
+    const href = (el.getAttribute && el.getAttribute("href")) || "";
+    if (/cart\.coupang\.com/.test(href)) return false;
     const t = (el.innerText || el.value || "").trim();
     if (!t) return false;
     if (FORBIDDEN.some((f) => t.includes(f))) return false;
-    return t.includes("장바구니 담기") || t === "장바구니";
+    // '장바구니' 단독(헤더 네비)으로는 매칭하지 않고, 실제 담기 버튼 문구만 매칭.
+    return t.includes("장바구니 담기");
   });
   if (!btn) return { status: "notfound" };
   try {
@@ -82,6 +87,8 @@ async function processItem(item) {
     await waitForTabComplete(tab.id);
     const res = await clickWithRetry(tab.id);
     if (res.ok) {
+      // 클릭 직후 바로 닫으면 담기 요청(비동기)이 취소될 수 있어, 잠시 대기 후 닫는다.
+      await delay(SETTLE_MS);
       try {
         await chrome.tabs.remove(tab.id); // 담았으면 탭 닫기
       } catch (e) {}
