@@ -1,0 +1,13 @@
+# frontend/ 공통 무시 (web·extension 하위 어디서든)
+# 빌드/의존성/로컬값은 커밋하지 않는다.
+**/node_modules/
+**/.next/
+**/out/
+**/.env
+**/.env*.local
+**/*.tsbuildinfo
+**/.venv/
+**/__pycache__/
+.next/
+node_modules/
+.DS_Store
