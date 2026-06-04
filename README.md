@@ -31,8 +31,16 @@ backend/
 
 ```bash
 cd backend
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+Recipe Agent를 실제 ChromaDB VectorDB에 연결할 때만 선택 의존성을 추가로 설치합니다.
+
+```bash
+pip install -r requirements-rag.txt
 ```
 
 ```bash
@@ -42,3 +50,24 @@ curl -X POST http://127.0.0.1:8000/chat \
 ```
 
 현재 코드는 외부 API 없이 agent 흐름을 보여주는 mock MVP입니다. 이후 Claude, Cohere embedding, ChromaDB, PostgreSQL, Coupang 연동을 각 tool 함수 내부에 연결하면 됩니다.
+
+## LLM 연결
+
+기본값은 API 키 없이 동작하는 deterministic fallback입니다. 실제 LLM을 붙일 때는 백엔드 실행 전에 환경변수를 설정합니다.
+
+```bash
+set FRIDGEMATE_LLM_PROVIDER=anthropic
+set FRIDGEMATE_LLM_MODEL=claude-3-5-sonnet-latest
+set ANTHROPIC_API_KEY=your_api_key
+uvicorn app.main:app --reload
+```
+
+OpenAI 계열 모델을 쓰려면 `FRIDGEMATE_LLM_PROVIDER=openai`, `OPENAI_API_KEY=...`로 바꾸면 됩니다.
+
+현재 LLM 연결 지점:
+
+- Orchestrator: Supervisor routing JSON 생성
+- Meal Agent: Plan-and-Execute 식단 계획 JSON 생성
+- Shopping Agent: Reflexion 실패 회고 JSON 생성
+
+API 키가 없거나 호출이 실패하면 같은 JSON 구조의 fallback으로 계속 실행됩니다.

@@ -1,0 +1,6 @@
+# Optional RAG dependencies.
+# Install this later when Recipe Agent is connected to a real VectorDB.
+#
+# If your Python environment already has transformers/tokenizers installed,
+# install these in a fresh virtual environment to avoid resolver conflicts.
+chromadb

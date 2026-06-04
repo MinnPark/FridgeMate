@@ -37,9 +37,14 @@ def search_coupang_products(
         products.append(
             {
                 "ingredient": ingredient["name"],
-                "product_name": f"FridgeMate 추천 {ingredient['name']}",
+                "product_name": (
+                    f"FridgeMate 예산형 {ingredient['name']}"
+                    if prefer_budget
+                    else f"FridgeMate 추천 {ingredient['name']}"
+                ),
                 "quantity": f"{ingredient['amount']}{ingredient['unit']}",
                 "price": base_price,
+                "search_strategy": "budget_first" if prefer_budget else "quality_first",
             }
         )
     return products
