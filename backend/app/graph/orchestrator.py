@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 
 from app.agents.meal_agent import meal_agent
+from app.agents.pantry_agent import pantry_agent          # ← 추가
 from app.agents.recipe_agent import recipe_agent
 from app.agents.shopping_agent import shopping_agent
 from app.graph.state import FridgeMateState
@@ -64,11 +65,15 @@ def _fallback_next_steps(route: str) -> list[str]:
 def build_graph():
     graph = StateGraph(FridgeMateState)
 
+    graph.add_node("pantry", pantry_agent)                # ← 추가
     graph.add_node("meal", meal_agent)
     graph.add_node("recipe", recipe_agent)
     graph.add_node("shopping", shopping_agent)
 
-    graph.set_conditional_entry_point(
+    graph.set_entry_point("pantry")                       # ← pantry를 첫 노드로
+
+    graph.add_conditional_edges(                          # ← pantry 이후 LLM 라우팅
+        "pantry",
         supervisor_router,
         {
             "meal": "meal",
