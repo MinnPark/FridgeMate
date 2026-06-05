@@ -1,0 +1,20 @@
+[
+  {"id": "sub-001", "original": "돼지고기", "substitutes": ["닭고기", "두부", "소고기"], "reason_types": ["가격", "건강"], "cost_reduction": 0.3, "nutrition_delta": "단백질 유사, 지방↓", "note": "찌개·볶음에서 닭고기/두부로 대체 시 지방 감소"},
+  {"id": "sub-002", "original": "소고기", "substitutes": ["돼지고기", "닭가슴살", "버섯"], "reason_types": ["가격"], "cost_reduction": 0.45, "nutrition_delta": "단백질 유사, 비용 절감", "note": "국·볶음에서 돼지고기로 대체"},
+  {"id": "sub-003", "original": "두부", "substitutes": ["순두부", "유부", "계란"], "reason_types": ["식감", "재고"], "cost_reduction": 0.0, "nutrition_delta": "식물성 단백질 유지", "note": "찌개 식감 차이"},
+  {"id": "sub-004", "original": "대파", "substitutes": ["쪽파", "양파", "부추"], "reason_types": ["재고"], "cost_reduction": 0.1, "nutrition_delta": "향미 유사", "note": "국물요리 향 보강용 대체"},
+  {"id": "sub-005", "original": "고추장", "substitutes": ["된장", "고춧가루+간장", "쌈장"], "reason_types": ["재고", "맛"], "cost_reduction": 0.0, "nutrition_delta": "나트륨 유사", "note": "매운맛 베이스 대체"},
+  {"id": "sub-006", "original": "된장", "substitutes": ["청국장", "미소", "고추장"], "reason_types": ["맛"], "cost_reduction": 0.0, "nutrition_delta": "발효 단백질 유사", "note": "찌개 베이스"},
+  {"id": "sub-007", "original": "계란", "substitutes": ["두부", "메추리알"], "reason_types": ["알레르기", "재고"], "cost_reduction": 0.0, "nutrition_delta": "단백질 유사", "note": "부침·고명 대체"},
+  {"id": "sub-008", "original": "쌀", "substitutes": ["현미", "잡곡", "퀴노아"], "reason_types": ["건강"], "cost_reduction": -0.2, "nutrition_delta": "식이섬유↑ GI↓", "note": "비빔밥·오므라이스 베이스"},
+  {"id": "sub-009", "original": "스파게티 면", "substitutes": ["펜네", "링귀니", "쌀국수"], "reason_types": ["재고"], "cost_reduction": 0.0, "nutrition_delta": "탄수 유사", "note": "파스타 면 종류 대체"},
+  {"id": "sub-010", "original": "베이컨", "substitutes": ["판체타", "삼겹살", "햄"], "reason_types": ["가격", "재고"], "cost_reduction": 0.25, "nutrition_delta": "지방 유사", "note": "양식 감칠맛"},
+  {"id": "sub-011", "original": "토마토소스", "substitutes": ["생토마토+다진마늘", "케첩+물", "파스타소스"], "reason_types": ["재고"], "cost_reduction": 0.15, "nutrition_delta": "리코펜 유지", "note": "파스타 소스 대체"},
+  {"id": "sub-012", "original": "올리브유", "substitutes": ["포도씨유", "카놀라유", "참기름(소량)"], "reason_types": ["가격", "재고"], "cost_reduction": 0.4, "nutrition_delta": "불포화지방 유사", "note": "볶음·드레싱"},
+  {"id": "sub-013", "original": "닭고기", "substitutes": ["돼지고기", "두부", "닭가슴살"], "reason_types": ["식감", "건강"], "cost_reduction": 0.0, "nutrition_delta": "단백질 유사", "note": "볶음탕·조림"},
+  {"id": "sub-014", "original": "당근", "substitutes": ["파프리카", "애호박", "단호박"], "reason_types": ["재고", "색감"], "cost_reduction": 0.0, "nutrition_delta": "비타민A 유사", "note": "볶음·비빔 고명"},
+  {"id": "sub-015", "original": "시금치", "substitutes": ["근대", "청경채", "부추"], "reason_types": ["재고"], "cost_reduction": 0.1, "nutrition_delta": "엽산·철분 유사", "note": "나물·비빔"},
+  {"id": "sub-016", "original": "두반장", "substitutes": ["고추장+된장", "칠리소스", "고춧가루+간장"], "reason_types": ["재고"], "cost_reduction": 0.2, "nutrition_delta": "매운 발효장 유사", "note": "마파두부 베이스"},
+  {"id": "sub-017", "original": "양파", "substitutes": ["대파", "샬롯", "부추"], "reason_types": ["재고"], "cost_reduction": 0.1, "nutrition_delta": "단맛·향 유사", "note": "볶음 베이스"},
+  {"id": "sub-018", "original": "감자", "substitutes": ["고구마", "무", "단호박"], "reason_types": ["재고", "건강"], "cost_reduction": 0.0, "nutrition_delta": "탄수 유사 GI 차이", "note": "닭볶음탕·조림"}
+]

@@ -1,0 +1,214 @@
+[
+  {
+    "id": "seed-001",
+    "name": "김치찌개",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "김치", "qty": 300, "unit": "g"},
+      {"name": "돼지고기", "qty": 200, "unit": "g"},
+      {"name": "두부", "qty": 0.5, "unit": "모"},
+      {"name": "대파", "qty": 1, "unit": "개"},
+      {"name": "마늘", "qty": 1, "unit": "큰술"}
+    ],
+    "steps": [
+      "김치는 한입 크기로 자른다.",
+      "돼지고기는 김치와 함께 5분간 볶는다.",
+      "물 500ml 와 두부, 대파를 넣고 15분 끓인다.",
+      "간을 보고 마늘을 추가해 마무리한다."
+    ],
+    "time_min": 25, "difficulty": "easy",
+    "calories": 380, "protein": 22, "carb": 18, "fat": 24,
+    "source": "manual", "source_url": "https://example.com/kimchi-jjigae"
+  },
+  {
+    "id": "seed-002",
+    "name": "비빔밥",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "쌀", "qty": 1, "unit": "컵"},
+      {"name": "시금치", "qty": 100, "unit": "g"},
+      {"name": "당근", "qty": 0.5, "unit": "개"},
+      {"name": "계란", "qty": 1, "unit": "개"},
+      {"name": "고추장", "qty": 2, "unit": "큰술"},
+      {"name": "참기름", "qty": 1, "unit": "작은술"}
+    ],
+    "steps": [
+      "쌀로 밥을 짓는다.",
+      "시금치는 데쳐 짜고, 당근은 채 썰어 볶는다.",
+      "계란 후라이를 부친다.",
+      "그릇에 밥을 담고 나물·계란·고추장·참기름을 올린다."
+    ],
+    "time_min": 30, "difficulty": "easy",
+    "calories": 520, "protein": 18, "carb": 78, "fat": 14,
+    "source": "manual", "source_url": "https://example.com/bibimbap"
+  },
+  {
+    "id": "seed-003",
+    "name": "토마토 파스타",
+    "cuisine_type": "양식",
+    "ingredients": [
+      {"name": "스파게티 면", "qty": 200, "unit": "g"},
+      {"name": "마늘", "qty": 3, "unit": "쪽"},
+      {"name": "올리브유", "qty": 3, "unit": "큰술"},
+      {"name": "베이컨", "qty": 100, "unit": "g"},
+      {"name": "토마토소스", "qty": 200, "unit": "g"}
+    ],
+    "steps": [
+      "면을 끓는 소금물에 8분 삶는다.",
+      "팬에 올리브유를 두르고 마늘·베이컨을 볶는다.",
+      "토마토소스를 넣고 끓이다 면을 넣어 비빈다.",
+      "간을 맞추고 파마산을 올려 마무리한다."
+    ],
+    "time_min": 20, "difficulty": "easy",
+    "calories": 620, "protein": 24, "carb": 75, "fat": 22,
+    "source": "manual", "source_url": "https://example.com/tomato-pasta"
+  },
+  {
+    "id": "seed-004",
+    "name": "된장찌개",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "된장", "qty": 3, "unit": "큰술"},
+      {"name": "두부", "qty": 0.5, "unit": "모"},
+      {"name": "애호박", "qty": 0.5, "unit": "개"},
+      {"name": "양파", "qty": 0.5, "unit": "개"},
+      {"name": "대파", "qty": 1, "unit": "개"}
+    ],
+    "steps": [
+      "물 500ml에 된장을 풀어 끓인다.",
+      "애호박·양파를 썰어 넣고 10분 끓인다.",
+      "두부를 넣고 5분 더 끓인다.",
+      "대파를 올려 마무리한다."
+    ],
+    "time_min": 20, "difficulty": "easy",
+    "calories": 220, "protein": 12, "carb": 18, "fat": 9,
+    "source": "manual", "source_url": "https://example.com/doenjang-jjigae"
+  },
+  {
+    "id": "seed-005",
+    "name": "닭볶음탕",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "닭고기", "qty": 500, "unit": "g"},
+      {"name": "감자", "qty": 2, "unit": "개"},
+      {"name": "당근", "qty": 1, "unit": "개"},
+      {"name": "양파", "qty": 1, "unit": "개"},
+      {"name": "고추장", "qty": 3, "unit": "큰술"},
+      {"name": "간장", "qty": 2, "unit": "큰술"}
+    ],
+    "steps": [
+      "닭은 한입 크기로 손질해 데친다.",
+      "감자·당근·양파를 큼직하게 썬다.",
+      "양념(고추장+간장+물)에 닭과 채소를 넣고 30분 끓인다.",
+      "국물이 자작해질 때까지 졸인다."
+    ],
+    "time_min": 50, "difficulty": "medium",
+    "calories": 520, "protein": 38, "carb": 30, "fat": 22,
+    "source": "manual", "source_url": "https://example.com/dakbokkeumtang"
+  },
+  {
+    "id": "seed-006",
+    "name": "계란말이",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "계란", "qty": 4, "unit": "개"},
+      {"name": "당근", "qty": 0.25, "unit": "개"},
+      {"name": "쪽파", "qty": 2, "unit": "줄기"},
+      {"name": "소금", "qty": 0.5, "unit": "작은술"}
+    ],
+    "steps": [
+      "계란을 풀고 소금으로 간한다.",
+      "당근·쪽파를 잘게 다져 넣는다.",
+      "팬에 얇게 부어 말아가며 익힌다.",
+      "완성 후 한입 크기로 자른다."
+    ],
+    "time_min": 10, "difficulty": "easy",
+    "calories": 280, "protein": 22, "carb": 4, "fat": 19,
+    "source": "manual", "source_url": "https://example.com/gyeran-mari"
+  },
+  {
+    "id": "seed-007",
+    "name": "마파두부",
+    "cuisine_type": "중식",
+    "ingredients": [
+      {"name": "두부", "qty": 1, "unit": "모"},
+      {"name": "다진 돼지고기", "qty": 150, "unit": "g"},
+      {"name": "두반장", "qty": 2, "unit": "큰술"},
+      {"name": "대파", "qty": 1, "unit": "개"},
+      {"name": "마늘", "qty": 1, "unit": "큰술"}
+    ],
+    "steps": [
+      "두부를 깍둑썰기 한다.",
+      "팬에 마늘·대파를 볶다 다진 고기를 넣는다.",
+      "두반장과 물 200ml를 넣어 끓인다.",
+      "두부를 넣고 5분 더 끓여 마무리한다."
+    ],
+    "time_min": 25, "difficulty": "medium",
+    "calories": 360, "protein": 24, "carb": 10, "fat": 24,
+    "source": "manual", "source_url": "https://example.com/mapo-tofu"
+  },
+  {
+    "id": "seed-008",
+    "name": "오므라이스",
+    "cuisine_type": "양식",
+    "ingredients": [
+      {"name": "쌀", "qty": 1, "unit": "컵"},
+      {"name": "계란", "qty": 2, "unit": "개"},
+      {"name": "양파", "qty": 0.5, "unit": "개"},
+      {"name": "케첩", "qty": 3, "unit": "큰술"},
+      {"name": "햄", "qty": 50, "unit": "g"}
+    ],
+    "steps": [
+      "양파·햄을 다져 케첩과 함께 볶밥을 만든다.",
+      "계란을 풀어 얇게 부친다.",
+      "볶밥을 계란 위에 올려 말아 감싼다.",
+      "케첩을 뿌려 완성한다."
+    ],
+    "time_min": 25, "difficulty": "medium",
+    "calories": 580, "protein": 20, "carb": 70, "fat": 22,
+    "source": "manual", "source_url": "https://example.com/omurice"
+  },
+  {
+    "id": "seed-009",
+    "name": "샐러드 보울",
+    "cuisine_type": "양식",
+    "ingredients": [
+      {"name": "로메인", "qty": 100, "unit": "g"},
+      {"name": "방울토마토", "qty": 10, "unit": "개"},
+      {"name": "닭가슴살", "qty": 150, "unit": "g"},
+      {"name": "올리브유", "qty": 1, "unit": "큰술"},
+      {"name": "발사믹 식초", "qty": 1, "unit": "큰술"}
+    ],
+    "steps": [
+      "닭가슴살을 구워 슬라이스한다.",
+      "로메인과 방울토마토를 담는다.",
+      "닭가슴살을 올리고 드레싱을 뿌린다.",
+      "치즈나 견과류를 곁들인다."
+    ],
+    "time_min": 15, "difficulty": "easy",
+    "calories": 320, "protein": 32, "carb": 12, "fat": 14,
+    "source": "manual", "source_url": "https://example.com/salad-bowl"
+  },
+  {
+    "id": "seed-010",
+    "name": "제육볶음",
+    "cuisine_type": "한식",
+    "ingredients": [
+      {"name": "돼지고기", "qty": 300, "unit": "g"},
+      {"name": "양파", "qty": 1, "unit": "개"},
+      {"name": "당근", "qty": 0.5, "unit": "개"},
+      {"name": "고추장", "qty": 3, "unit": "큰술"},
+      {"name": "간장", "qty": 1, "unit": "큰술"},
+      {"name": "마늘", "qty": 1, "unit": "큰술"}
+    ],
+    "steps": [
+      "돼지고기를 양념에 30분 재운다.",
+      "팬에 양파·당근을 볶는다.",
+      "재운 돼지고기를 넣고 강불에 볶는다.",
+      "참기름을 둘러 마무리한다."
+    ],
+    "time_min": 30, "difficulty": "easy",
+    "calories": 520, "protein": 36, "carb": 20, "fat": 30,
+    "source": "manual", "source_url": "https://example.com/jeyuk-bokkeum"
+  }
+]

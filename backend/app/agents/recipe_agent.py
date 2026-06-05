@@ -1,6 +1,7 @@
 from app.config import settings
 from app.graph.state import FridgeMateState
 from app.prompts.recipe_prompts import HYDE_PROMPT, RAG_FUSION_PROMPT
+from app.rag.integration import search_sync, THEIR_STRATEGY
 
 
 MOCK_RECIPE_INDEX = [
@@ -61,19 +62,27 @@ def mock_vector_search(query: str) -> list[dict]:
 
 
 def retrieve_recipes(query: str, state: FridgeMateState) -> list[dict]:
+    """실 RAG(bge-m3 임베딩 + HyDE/RAG-Fusion/RRF, recipe_db 1,693건)로 검색.
+
+    전략 판정(choose_rag_strategy)과 trace 포맷(프론트 AgentPipelinePanel 호환)은 유지,
+    실행부만 mock_vector_search → app.rag.integration.search_sync 로 교체.
+    반환 계약 동일: {id,name,text,ingredients[name,amount,unit],nutrition{...},score,(+citation_url)}.
+    """
     strategy = choose_rag_strategy(query)
     trace = {"strategy": strategy, "original_query": query}
 
     if strategy == "HyDE":
-        hyde_doc = generate_hyde_document(query)
-        trace.update({"prompt": HYDE_PROMPT, "hyde_document": hyde_doc})
-        results = mock_vector_search(hyde_doc)
+        trace.update({"prompt": HYDE_PROMPT, "hyde_document": generate_hyde_document(query)})
     elif strategy == "RAG-Fusion":
-        rewritten = rewrite_queries_for_fusion(query)
-        trace.update({"prompt": RAG_FUSION_PROMPT, "rewritten_queries": rewritten})
-        results = mock_vector_search(" ".join(rewritten))
-    else:
-        results = mock_vector_search(query)
+        trace.update({"prompt": RAG_FUSION_PROMPT, "rewritten_queries": rewrite_queries_for_fusion(query)})
+
+    results, rag_trace = search_sync(query, strategy=THEIR_STRATEGY.get(strategy, "basic"))
+    trace.update({
+        "engine": "rag(bge-m3)",
+        "n_results": rag_trace.get("n_results"),
+        "via": rag_trace.get("via"),
+        "cache_hit": rag_trace.get("cache_hit"),
+    })
 
     state["recipe_search_trace"] = trace
     return results

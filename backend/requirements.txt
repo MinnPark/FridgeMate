@@ -3,3 +3,10 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.4
 langgraph>=1.0.2,<1.1.0
 langchain-core>=1.1.0,<2.0.0
+
+# RAG 엔진 (fridge-mate B파트 이식) — bge-m3 임베딩 + ChromaDB + HyDE/RAG-Fusion/RRF
+chromadb
+httpx
+openai>=1.50
+tenacity
+python-dotenv
