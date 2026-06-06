@@ -77,12 +77,17 @@ def retrieve_recipes(query: str, state: FridgeMateState) -> list[dict]:
         trace.update({"prompt": RAG_FUSION_PROMPT, "rewritten_queries": rewrite_queries_for_fusion(query)})
 
     results, rag_trace = search_sync(query, strategy=THEIR_STRATEGY.get(strategy, "basic"))
+    top = [r.get("name", "") for r in results[:5]]
     trace.update({
         "engine": "rag(bge-m3)",
         "n_results": rag_trace.get("n_results"),
         "via": rag_trace.get("via"),
         "cache_hit": rag_trace.get("cache_hit"),
+        "top": top,
     })
+    # RAG 작동 가시화 (백엔드 로그 + trace -> 프론트 패널/LangSmith)
+    print(f"[RAG] analyze : q={query!r} -> strategy={strategy} (engine=rag/bge-m3)", flush=True)
+    print(f"[RAG] retrieve: via={trace.get('via')} n={len(results)} top={top}", flush=True)
 
     state["recipe_search_trace"] = trace
     return results

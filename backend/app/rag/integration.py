@@ -203,6 +203,16 @@ def retrieve_recipes(query: str, state) -> list[dict]:
     their = _resolve_strategy(query)
     results, trace = search_sync(query, strategy=THEIR_STRATEGY.get(their, "basic"))
     trace["strategy"] = their  # HyDE / RAG-Fusion / Basic-RAG (프론트 AgentPipelinePanel 호환)
+    # RAG 작동 가시화: 백엔드 로그 + trace(프론트 패널/LangSmith)에 단계 반영
+    top = [r.get("name", "") for r in results[:5]]
+    try:
+        from app.rag.embedder import Embedder
+        emb = f"{Embedder().provider}/{Embedder().model}"
+    except Exception:
+        emb = "?"
+    trace.update({"embedder": emb, "top": top})
+    print(f"[RAG] analyze: q={query!r} -> strategy={their} (embedder={emb})", flush=True)
+    print(f"[RAG] retrieve: via={trace.get('via')} n={len(results)} top={top}", flush=True)
     state["recipe_search_trace"] = trace
     return results
 
