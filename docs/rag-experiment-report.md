@@ -14,14 +14,16 @@
 - 오타(김치찌게 등): plain·smart 모두 4/4 (bge-m3 오타 강건).
 - 묘사/구어: plain 약함 -> smart 가 LLM 쿼리확장으로 대폭 회복.
 
-### 1-1. 재검증 (2026-06-06, scripts/rag_eval.py 재실행)
+### 1-1. 재검증 (2026-06-06, `backend/scripts/rag_eval.py` 머지레포 이식 후 재실행)
 | 경로 | P@1 | P@3 | MRR | 재현성 |
 |---|---|---|---|---|
-| PLAIN (run1=보고서 / run2=재검증) | 50% / **50%** | 69% / **69%** | 0.594 / **0.594** | **완전 동일** (순수 벡터 = 결정적) |
-| SMART (run1 / run2) | 75% / **50%** | 88% / **81%** | 0.802 / **0.646** | **변동** (HyDE/Fusion = LLM 비결정적) |
+| PLAIN (전 run) | **50%** | **69%** | **0.594** | **완전 동일** (순수 벡터 = 결정적) |
+| SMART run1 (보고서, cloud Sonnet) | 75% | 88% | 0.802 | — |
+| SMART run2 (OpenRouter) | 50% | 81% | 0.646 | 변동 |
+| SMART run3 (LM Studio qwen2.5-7b) | 62% | 81% | 0.698 | 변동 |
 
 - **PLAIN 은 완전 재현됨** (벡터검색 결정적).
-- **SMART 는 run 마다 변동** — HyDE 가상답변/Fusion 멀티쿼리가 LLM 출력이라 매 실행 달라짐. 따라서 보고서의 SMART 수치는 "1회 측정치"이며 **고정값으로 보면 안 됨**.
+- **SMART 는 run/모델마다 변동** — HyDE 가상답변/Fusion 멀티쿼리가 LLM 출력이라 매 실행 달라짐. 보고서 SMART 수치는 "1회 측정치"이며 **고정값으로 보면 안 됨**. (로컬 7b 서브모델도 P@3 81%로 양호)
 - **일관되게 유지되는 결론**: SMART 가 묘사/구어 쿼리에서 P@3/MRR 을 끌어올림(2회 모두 PLAIN 대비 P@3 +12~19%p). 단 **P@1 향상폭은 run 의존적**(run2 에선 +0%p).
 - 정밀 비교하려면 **온도 0 고정 + 다회 평균** 필요 (후속 과제).
 
@@ -58,4 +60,5 @@
 - `app.main` import 부팅 OK + `/chat` e2e 200 (citation 포함).
 - embed_text ablation 실행 -> 현행 유지.
 - **런타임 주의(중요)**: RAG LLM(HyDE/Fusion)은 `app/rag/_llm.py`가 `openai` SDK 로 OpenRouter/LM Studio 호출. **`openai` 미설치 python 으로 백엔드를 띄우면 LLM 호출이 `No module named 'openai'` 로 실패 → 조용히 일반 벡터검색으로 폴백(`via=None`)**. 라벨은 RAG-Fusion 으로 찍혀도 실제 멀티쿼리는 안 돎. → 의존성 설치된 python(또는 전용 venv)으로 기동 필수.
-- 후속: 전용 venv 표준화, eval 하네스 머지레포 이식, 데이터확충, 메타필터/reranker, eval 온도0·다회평균.
+- **eval 하네스 이식 완료**: `backend/scripts/{rag_eval,rag_inspect,rag_ablation}.py` (+ README). 보고서 수치 재현/검증 가능.
+- 후속: 전용 venv 표준화, 데이터확충, 메타필터/reranker, eval 온도0·다회평균.
