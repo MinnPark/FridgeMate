@@ -36,12 +36,16 @@ export function IngredientDetailModal({ open, name, onCancel, onAdd }: Props) {
     }
   }, [open, name]);
 
+  // 용량·유통기한은 필수 입력(보관방법은 기본값이 항상 있음).
+  const canSubmit = amount.trim() !== "" && expirationDate !== "";
+
   function submit() {
+    if (!canSubmit) return;
     onAdd({
       name,
-      amount: amount.trim() || undefined,
-      expirationDate: expirationDate || undefined,
-      storageType: storageType || undefined,
+      amount: amount.trim(),
+      expirationDate,
+      storageType,
     });
   }
 
@@ -98,11 +102,17 @@ export function IngredientDetailModal({ open, name, onCancel, onAdd }: Props) {
       <p className="mt-3 text-[11px] text-white/40">
         예: 300g, 1개, 2팩 / 달력에서 유통기한을 선택하세요.
       </p>
+      {!canSubmit && (
+        <p className="mt-1 text-[11px] text-amber-300/80">
+          용량과 유통기한은 필수 입력이에요.
+        </p>
+      )}
 
       <div className="mt-4 flex gap-2">
         <button
           onClick={submit}
-          className="flex-1 rounded-xl bg-lime-accent py-2.5 text-sm font-bold text-ink-900 transition hover:brightness-105"
+          disabled={!canSubmit}
+          className="flex-1 rounded-xl bg-lime-accent py-2.5 text-sm font-bold text-ink-900 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
         >
           팬트리에 추가
         </button>
