@@ -13,6 +13,7 @@ export type DeliveryPreference = "speed" | "freshness" | "price" | "nutrition";
 
 export interface FridgeMateRequest {
   ingredients: string; // 쉼표 구분 텍스트 (예: "닭가슴살, 계란, 브로콜리, 두부")
+  ingredientEntries?: IngredientEntry[]; // 재료 세부정보(용량/유통기한/보관) — 백엔드 Pantry 분석용
   mode: FridgeMateMode;
   goal?: string;
   proteinTargetGram?: number;
@@ -76,11 +77,12 @@ export interface PantryItem {
 }
 
 // 사용자가 직접 입력한 재료(상세 입력 팝업에서 받음). Pantry 분석에 반영된다.
+// 상세 입력 팝업에서 모두 필수로 받으므로 전 필드 필수(백엔드 ingredient_entries 계약과 일치).
 export interface IngredientEntry {
   name: string;
-  amount?: string;
-  expirationDate?: string;
-  storageType?: string;
+  amount: string; // 용량/수량 (예: "300g", "1모", "10개")
+  expirationDate: string; // 유통기한 "YYYY-MM-DD"
+  storageType: string; // 보관 방법 (예: "냉장 보관")
 }
 
 export interface PantryAnalysis {
