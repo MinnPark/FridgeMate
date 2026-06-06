@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentPipelinePanel } from "@/components/AgentPipelinePanel";
 import { CartExecutionCard } from "@/components/CartExecutionCard";
@@ -32,6 +32,7 @@ function isValidRunResponse(d: RunResponse | undefined | null): d is RunResponse
 
 // 한 페이지 End-to-End 대시보드: 상단 헤더 / 좌(메인) · 우(Agent Pipeline) 2열.
 export default function HomePage() {
+  const hasAutoRun = useRef(false);
   const [ingredients, setIngredients] = useState<IngredientEntry[]>(
     DEFAULT_INGREDIENT_ENTRIES,
   );
@@ -71,6 +72,8 @@ export default function HomePage() {
 
   // 진입 시 1회 자동 실행.
   useEffect(() => {
+    if (hasAutoRun.current) return;
+    hasAutoRun.current = true;
     void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

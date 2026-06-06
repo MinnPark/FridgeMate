@@ -57,7 +57,18 @@ def execute_meal_plan(plan: dict, state: FridgeMateState) -> tuple[list[dict], l
             meal_name = meal.get("name", "")
             # 사용자 의도(고단백/한식/예산 등)를 요리명에 실어야 RAG 전략판정이 Fusion까지 도달
             intent = " ".join(_extract_constraints(state.get("user_input", "")))
-            retrieved = retrieve_recipes(f"{meal_name} {intent}".strip(), state)
+            query = f"{meal_name} {intent}".strip()
+            try:
+                retrieved = retrieve_recipes(query, state)
+                retrieval_error = None
+            except Exception as exc:
+                retrieved = []
+                retrieval_error = f"{type(exc).__name__}: {exc}"
+                print(
+                    f"[Meal] recipe retrieval failed: q={query!r} "
+                    f"error={retrieval_error}",
+                    flush=True,
+                )
             added = []
             for recipe in retrieved:
                 recipe_id = recipe.get("id", recipe.get("name"))
@@ -71,6 +82,7 @@ def execute_meal_plan(plan: dict, state: FridgeMateState) -> tuple[list[dict], l
                     "meal": meal_name,
                     "action": "retrieve_recipes",
                     "observation": added,
+                    "error": retrieval_error,
                     "rag_trace": state.get("recipe_search_trace", {}),
                 }
             )
