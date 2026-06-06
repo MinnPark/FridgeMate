@@ -87,8 +87,9 @@ def _call_openai_json(
             {"role": "user", "content": user_prompt},
         ],
     }
+    base = os.getenv("FRIDGEMATE_LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        f"{base}/chat/completions",  # OpenRouter 등 OpenAI 호환 엔드포인트 지원
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
