@@ -29,12 +29,14 @@ type Phase = "idle" | "running" | "result";
 
 interface Props {
   shopping: ShoppingList;
+  // 실제 담기 실행 상태를 상위(Agent Pipeline의 Executor 단계)로 알린다.
+  onStatusChange?: (status: "running" | "completed" | "failed") => void;
 }
 
 // 부족 재료 장보기 + 쿠팡 실행부 통합 카드.
 // 좌: 부족 재료 요약 / 우: 분석 → 검색 URL 생성(자동) → 장바구니 담기(수동) 진행 상태.
 // 자동 담기는 Chrome 확장으로 실행한다(결제 없음).
-export function CartExecutionCard({ shopping }: Props) {
+export function CartExecutionCard({ shopping, onStatusChange }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [exec, setExec] = useState<CartExecuteResponse | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
@@ -81,12 +83,14 @@ export function CartExecutionCard({ shopping }: Props) {
         "FridgeMate Cart Helper 확장 프로그램이 감지되지 않았어요. chrome://extensions 에서 frontend/extension 을 로드하고 쿠팡에 로그인한 뒤 다시 시도해 주세요.",
       );
       setPhase("result");
+      onStatusChange?.("failed");
       return;
     }
     setPhase("running");
     setExec(null);
     setExecError(null);
     setProgress({ done: 0, total: items.length });
+    onStatusChange?.("running");
     try {
       const res = await executeViaExtension(items, (p: ExecProgress) => {
         // 병렬 처리이므로 완료 수(done)는 item-done 기준으로만 증가시키고,
@@ -100,10 +104,14 @@ export function CartExecutionCard({ shopping }: Props) {
         });
       });
       setExec(res);
+      // 하나라도 담겼으면 Executor 단계 완료로 본다(부분 실패 포함).
+      const anySuccess = res.results.some((r) => r.status === "success");
+      onStatusChange?.(anySuccess ? "completed" : "failed");
     } catch (e) {
       setExecError(
         e instanceof Error ? e.message : "실제 장바구니 담기에 실패했습니다.",
       );
+      onStatusChange?.("failed");
     } finally {
       setPhase("result");
       setProgress(null);

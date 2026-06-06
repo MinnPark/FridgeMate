@@ -62,8 +62,10 @@ export default function HomePage() {
   const [result, setResult] = useState<RunResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
-  // 완료된 단계 수(0..PIPELINE_STAGES.length). 카드 공개·패널 상태를 결정.
+  // 완료된 분석 단계 수(0..PIPELINE_STAGES.length-1). 카드 공개·패널 상태를 결정.
   const [revealed, setRevealed] = useState(0);
+  // Executor(쿠팡 담기) 단계는 분석으로 완료되지 않고, 실제 확장 실행 결과로만 완료된다.
+  const [cartStatus, setCartStatus] = useState<AgentStatus>("pending");
   // 재실행 시 이전 실행의 지연 공개 루프를 무효화하기 위한 토큰.
   const runTokenRef = useRef(0);
 
@@ -76,6 +78,7 @@ export default function HomePage() {
     setError(null);
     setResult(null);
     setRevealed(0);
+    setCartStatus("pending");
     setRunStatus("running");
     try {
       const req: FridgeMateRequest = {
@@ -92,8 +95,9 @@ export default function HomePage() {
       }
       setResult(data);
       if (notice) setError("백엔드 연결에 실패했습니다. 현재는 예시 결과를 표시합니다.");
-      // 파이프라인 순서대로 단계적으로 공개.
-      for (let s = 1; s <= PIPELINE_STAGES.length; s++) {
+      // 분석 단계(shopping)까지만 순차 공개. 마지막 Executor(쿠팡 담기)는
+      // 자동 완료하지 않고 실제 확장 실행 결과로만 완료된다.
+      for (let s = 1; s <= PIPELINE_STAGES.length - 1; s++) {
         await delay(REVEAL_INTERVAL_MS);
         if (token !== runTokenRef.current) return;
         setRevealed(s);
@@ -137,20 +141,31 @@ export default function HomePage() {
   function buildPipeline(): AgentPipelineItem[] {
     return PIPELINE_STAGES.map((stage, i) => {
       let status: AgentStatus;
-      if (i < revealed) status = "completed";
+      if (stage.id === "executor") {
+        // 분석으로 완료되지 않고 실제 쿠팡 담기(확장) 실행 결과로만 완료된다.
+        status = cartStatus;
+      } else if (i < revealed) status = "completed";
       else if (runStatus === "error" && i === revealed) status = "failed";
       else if (runStatus === "running" && i === revealed) status = "running";
       else status = "pending";
 
       const fromResult = result?.pipeline.find((p) => p.id === stage.id);
       const message =
-        status === "completed"
-          ? (fromResult?.message ?? "완료")
-          : status === "running"
-            ? "분석 중입니다…"
-            : status === "failed"
-              ? "분석 실패"
-              : "대기 중";
+        stage.id === "executor"
+          ? status === "completed"
+            ? "장바구니 담기 완료"
+            : status === "running"
+              ? "장바구니에 담는 중…"
+              : status === "failed"
+                ? "담기 실패"
+                : "장바구니 담기 대기"
+          : status === "completed"
+            ? (fromResult?.message ?? "완료")
+            : status === "running"
+              ? "분석 중입니다…"
+              : status === "failed"
+                ? "분석 실패"
+                : "대기 중";
 
       return {
         id: stage.id,
@@ -255,7 +270,10 @@ export default function HomePage() {
           {/* 부족 재료 & 쿠팡 실행 (Shopping 단계 3) */}
           {revealedAt(3) ? (
             <div className="animate-reveal">
-              <CartExecutionCard shopping={result!.shopping} />
+              <CartExecutionCard
+                shopping={result!.shopping}
+                onStatusChange={setCartStatus}
+              />
             </div>
           ) : (
             <PlaceholderCard
