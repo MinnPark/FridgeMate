@@ -8,15 +8,11 @@ from app.graph.orchestrator import build_graph
 app = FastAPI(title="FridgeMate AI")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],  # dev: 프론트 포트 무관 허용 (8743 등)
     allow_methods=["*"],
     allow_headers=["*"],
 )
 graph = build_graph()
-
-# v3 멀티 엔드포인트 (additive) — 기존 /chat 유지 + /api/compose,run,stream,kpi 추가
-from app.v3.api import router as v3_router  # noqa: E402
-app.include_router(v3_router)
 
 
 class ChatRequest(BaseModel):
