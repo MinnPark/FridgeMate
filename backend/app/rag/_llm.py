@@ -39,16 +39,25 @@ PROVIDER_DEFAULT_MODELS: dict[str, dict[str, str]] = {
         "OPENROUTER_MODEL_JUDGE": "anthropic/claude-opus-4-7",
     },
     "local": {
-        "ANTHROPIC_MODEL_DEFAULT": "qwen2.5:7b",
-        "ANTHROPIC_MODEL_JUDGE": "qwen2.5:14b",
-        "LOCAL_MODEL_DEFAULT": "qwen2.5:7b",
-        "LOCAL_MODEL_JUDGE": "qwen2.5:14b",
+        "ANTHROPIC_MODEL_DEFAULT": "qwen2.5-7b-instruct",
+        "ANTHROPIC_MODEL_JUDGE": "qwen/qwen3-14b",
+        "LOCAL_MODEL_DEFAULT": "qwen2.5-7b-instruct",
+        "LOCAL_MODEL_JUDGE": "qwen/qwen3-14b",
     },
 }
 
 
 def current_provider() -> str:
     return os.getenv("LLM_PROVIDER", "anthropic").lower()
+
+
+def rag_subquery_provider() -> str:
+    """HyDE/Fusion 등 작은 서브쿼리 전용 provider.
+
+    티어링: 큰 오케스트레이션은 OpenRouter(Claude), 작은 서브쿼리는 LM Studio 로컬 서브모델.
+    기본 local. RAG_LLM_PROVIDER 로 override (예: openrouter 로 통일하고 싶을 때).
+    """
+    return os.getenv("RAG_LLM_PROVIDER", "local").lower()
 
 
 def llm_enabled(provider: str | None = None) -> bool:
@@ -179,9 +188,11 @@ async def call_llm(
                 cache_hint=model.startswith("anthropic/"),
             )
         elif p == "local":
+            # LM Studio(원격) 서브모델: base 는 LLM_LOCAL_BASE_URL > LMSTUDIO_BASE_URL,
+            # 인증키는 LMSTUDIO_API_KEY (원격 LM Studio 는 Bearer 토큰 요구).
             out = await _call_openai_compat(
-                base_url=os.getenv("LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1"),
-                api_key="local",
+                base_url=os.getenv("LLM_LOCAL_BASE_URL") or os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1"),
+                api_key=os.getenv("LMSTUDIO_API_KEY", "local"),
                 system_text=system_text,
                 user_content=user_content,
                 model=model,

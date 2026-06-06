@@ -14,6 +14,17 @@
 - 오타(김치찌게 등): plain·smart 모두 4/4 (bge-m3 오타 강건).
 - 묘사/구어: plain 약함 -> smart 가 LLM 쿼리확장으로 대폭 회복.
 
+### 1-1. 재검증 (2026-06-06, scripts/rag_eval.py 재실행)
+| 경로 | P@1 | P@3 | MRR | 재현성 |
+|---|---|---|---|---|
+| PLAIN (run1=보고서 / run2=재검증) | 50% / **50%** | 69% / **69%** | 0.594 / **0.594** | **완전 동일** (순수 벡터 = 결정적) |
+| SMART (run1 / run2) | 75% / **50%** | 88% / **81%** | 0.802 / **0.646** | **변동** (HyDE/Fusion = LLM 비결정적) |
+
+- **PLAIN 은 완전 재현됨** (벡터검색 결정적).
+- **SMART 는 run 마다 변동** — HyDE 가상답변/Fusion 멀티쿼리가 LLM 출력이라 매 실행 달라짐. 따라서 보고서의 SMART 수치는 "1회 측정치"이며 **고정값으로 보면 안 됨**.
+- **일관되게 유지되는 결론**: SMART 가 묘사/구어 쿼리에서 P@3/MRR 을 끌어올림(2회 모두 PLAIN 대비 P@3 +12~19%p). 단 **P@1 향상폭은 run 의존적**(run2 에선 +0%p).
+- 정밀 비교하려면 **온도 0 고정 + 다회 평균** 필요 (후속 과제).
+
 ## 2. 핵심 발견
 1. **고급 RAG(HyDE/RAG-Fusion+LLM) 가치 정량 입증** — +25%p. 묘사·구어에서 plain 벡터만으론 부족.
 2. **exact-name 메트릭이 1,693 코퍼스에서 과소평가** — "miss" 다수가 정답 변형:
@@ -41,8 +52,10 @@
 3. 메타데이터 pre-filter 연결(시간/장르/칼로리) + reranker.
 4. embed_text 는 더 안 건드림(효과 0 확인).
 
-## 5. 검증/QA 상태
-- recipe_db 1,693 retrieval 정상, SMART P@1 75%/P@3 88%/MRR 0.802.
+## 5. 검증/QA 상태 (2026-06-06 재검증)
+- **코퍼스 실측**: recipe_db `1,693`건, embed_sig=`bge-m3-1024`, 출처 `cookrcp 1146 / mafra 537 / manual 10` (보고서 수치와 일치).
+- **RAG 전략 실발동 확인**: `retrieve_recipes("…고단백 한식")` → `strategy=RAG-Fusion`, **`via=rag_fusion`** (멀티쿼리 4개 LLM 생성 → RRF → 출처 포함 10건). 폴백 아님 확인.
+- `app.main` import 부팅 OK + `/chat` e2e 200 (citation 포함).
 - embed_text ablation 실행 -> 현행 유지.
-- 머지 레포 `app.main` import 부팅 OK + `recipe_agent.retrieve_recipes` e2e 통과(citation 포함).
-- 후속: 데이터확충, 메타필터/reranker.
+- **런타임 주의(중요)**: RAG LLM(HyDE/Fusion)은 `app/rag/_llm.py`가 `openai` SDK 로 OpenRouter/LM Studio 호출. **`openai` 미설치 python 으로 백엔드를 띄우면 LLM 호출이 `No module named 'openai'` 로 실패 → 조용히 일반 벡터검색으로 폴백(`via=None`)**. 라벨은 RAG-Fusion 으로 찍혀도 실제 멀티쿼리는 안 돎. → 의존성 설치된 python(또는 전용 venv)으로 기동 필수.
+- 후속: 전용 venv 표준화, eval 하네스 머지레포 이식, 데이터확충, 메타필터/reranker, eval 온도0·다회평균.

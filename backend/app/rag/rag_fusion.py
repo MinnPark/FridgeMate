@@ -9,7 +9,7 @@ import asyncio
 from typing import Optional
 
 from app.rag.retriever import search_recipes
-from app.rag._llm import call_llm, llm_enabled
+from app.rag._llm import call_llm, llm_enabled, rag_subquery_provider
 
 MULTI_QUERY_SYSTEM_PROMPT_NAME = "rag_fusion_multi_query"
 RRF_K_CONST = 60
@@ -35,12 +35,14 @@ async def rag_fusion_search(
     cuisine_filter: Optional[str] = None,
     max_time: Optional[int] = None,
 ) -> list[dict]:
-    if not llm_enabled():
+    provider = rag_subquery_provider()
+    if not llm_enabled(provider):
         return await search_recipes(query, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
 
     raw = await call_llm(
         system_prompt_name=MULTI_QUERY_SYSTEM_PROMPT_NAME,
         user_content=query,
+        provider=provider,
         fallback="",
         max_tokens=200,
     )
@@ -55,4 +57,9 @@ async def rag_fusion_search(
     fused = reciprocal_rank_fusion(results, k_top=k)
     for d in fused:
         d["_via"] = "rag_fusion"
+    # 메커니즘 가시화: 다각도 멀티쿼리 + RRF 융합결과(출처)
+    print(f"[RAG/Fusion] q={query!r}", flush=True)
+    print(f"[RAG/Fusion] multi_queries(LLM:{provider}): {queries}", flush=True)
+    for d in fused:
+        print(f"[RAG/Fusion]   -> {d.get('name')} | rrf={d.get('_rrf_score')} | src={d.get('source')} | cite={d.get('source_url','')}", flush=True)
     return fused
