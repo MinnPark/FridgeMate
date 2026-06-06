@@ -55,7 +55,9 @@ def execute_meal_plan(plan: dict, state: FridgeMateState) -> tuple[list[dict], l
     for day in plan.get("days", []):
         for meal in day.get("meals", []):
             meal_name = meal.get("name", "")
-            retrieved = retrieve_recipes(meal_name, state)
+            # 사용자 의도(고단백/한식/예산 등)를 요리명에 실어야 RAG 전략판정이 Fusion까지 도달
+            intent = " ".join(_extract_constraints(state.get("user_input", "")))
+            retrieved = retrieve_recipes(f"{meal_name} {intent}".strip(), state)
             added = []
             for recipe in retrieved:
                 recipe_id = recipe.get("id", recipe.get("name"))

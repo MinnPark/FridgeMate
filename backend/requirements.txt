@@ -1,5 +1,19 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-langgraph>=1.0.2,<1.1.0
-langchain-core>=1.1.0,<2.0.0
+# FridgeMate backend 의존성 — 전부 버전 고정 (fresh clone 재현 보장, 2026-06-06 검증세트).
+# 설치: backend/ 에서  python -m venv .venv  ->  .venv\Scripts\activate  ->  pip install -r requirements.txt
+# 구동 전 과정(venv/.env/프론트/Studio)은 루트 RUN.md 참조.
+
+# --- 웹 서버 (FastAPI + ASGI) ---
+fastapi==0.115.6            # POST /chat, GET /health REST API
+uvicorn[standard]==0.34.0   # ASGI 서버 (백엔드 8742 기동)
+pydantic==2.10.4            # 요청/그래프 상태 스키마
+
+# --- 오케스트레이션 (LangGraph) ---
+langgraph==1.0.10           # 그래프: pantry -> meal/recipe -> shopping
+langchain-core==1.4.1       # langgraph 코어 의존
+
+# --- RAG 엔진 (bge-m3 임베딩 + ChromaDB + HyDE/RAG-Fusion/RRF) ---
+chromadb==1.5.9             # 로컬 벡터DB (recipe_db 1,693건, backend/data/chroma 동봉)
+httpx==0.28.1               # LM Studio(임베딩/서브LLM) HTTP 호출
+openai==2.41.0              # OpenAI호환 클라이언트 — OpenRouter(오케스트레이션 Claude) + LM Studio(서브쿼리)
+tenacity==9.1.4             # 외부 호출 재시도(exponential backoff)
+python-dotenv==1.2.2        # .env 자동 로드
