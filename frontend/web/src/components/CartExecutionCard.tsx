@@ -18,8 +18,11 @@ import type {
   CartExecuteResponse,
   ShoppingList,
 } from "@/lib/api/types";
+import { MOCK_CART_LINKS } from "@/lib/api/coupangMockLinks";
 
 import { Modal } from "./Modal";
+
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 type StepState = "done" | "running" | "pending";
 type Phase = "idle" | "running" | "result";
@@ -71,8 +74,7 @@ export function CartExecutionCard({ shopping }: Props) {
   const step3State: StepState =
     phase === "running" ? "running" : phase === "result" ? "done" : "pending";
 
-  async function runExecute() {
-    setConfirmOpen(false);
+  async function runItems(items: CartExecuteItem[]) {
     if (!extReady) {
       setExec(null);
       setExecError(
@@ -81,18 +83,21 @@ export function CartExecutionCard({ shopping }: Props) {
       setPhase("result");
       return;
     }
-    const items = buildExecItems();
     setPhase("running");
     setExec(null);
     setExecError(null);
     setProgress({ done: 0, total: items.length });
     try {
       const res = await executeViaExtension(items, (p: ExecProgress) => {
-        if (p.phase === "item-start") {
-          setProgress({ done: p.index, total: p.total, current: p.itemName });
-        } else {
-          setProgress({ done: p.done ?? p.index + 1, total: p.total });
-        }
+        // 병렬 처리이므로 완료 수(done)는 item-done 기준으로만 증가시키고,
+        // 진행 중 표시 이름은 item-start 에서 갱신한다(막대가 뒤로 가지 않도록).
+        setProgress((prev) => {
+          const base = prev ?? { done: 0, total: p.total };
+          if (p.phase === "item-start") {
+            return { ...base, total: p.total, current: p.itemName };
+          }
+          return { ...base, total: p.total, done: p.done ?? base.done };
+        });
       });
       setExec(res);
     } catch (e) {
@@ -103,6 +108,11 @@ export function CartExecutionCard({ shopping }: Props) {
       setPhase("result");
       setProgress(null);
     }
+  }
+
+  async function runExecute() {
+    setConfirmOpen(false);
+    await runItems(buildExecItems());
   }
 
   async function copyUrl() {
@@ -266,6 +276,17 @@ export function CartExecutionCard({ shopping }: Props) {
               className="mt-1.5 w-full text-center text-[11px] text-white/50 underline decoration-white/20 hover:text-white/80"
             >
               결과 상세 보기
+            </button>
+          )}
+
+          {/* dev 전용: 백엔드 URL 연동 전, mock 링크로 확장의 담기 경로(direct/adjust)를 검증 */}
+          {IS_DEV && (
+            <button
+              onClick={() => (phase === "running" ? undefined : runItems(MOCK_CART_LINKS))}
+              disabled={phase === "running"}
+              className="mt-1.5 w-full rounded-lg border border-dashed border-white/20 bg-white/[0.03] py-1.5 text-[11px] text-white/55 transition hover:bg-white/10 disabled:opacity-40"
+            >
+              🧪 Mock 링크로 담기 테스트 ({MOCK_CART_LINKS.length}개 · dev)
             </button>
           )}
         </div>

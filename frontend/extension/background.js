@@ -9,7 +9,9 @@
 const NAV_TIMEOUT_MS = 20000;
 const CLICK_ATTEMPTS = 10; // 버튼이 렌더될 때까지 짧게 재시도
 const CLICK_GAP_MS = 350;
-const SETTLE_MS = 1500; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
+const SETTLE_MS = 1000; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
+const QTY_SETTLE_MS = 1000; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전).
+const CONCURRENCY = 5; // 동시에 처리할 상품 탭 수(속도↑). 너무 크면 쿠팡 봇 의심/리소스 부담.
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
 // 페이지 컨텍스트에서 실행: 장바구니 담기 버튼만 찾아 클릭.
@@ -36,6 +38,86 @@ function clickAddToCartInPage() {
   } catch (e) {
     return { status: "error" };
   }
+}
+
+// 페이지 컨텍스트에서 실행: 상품 수량을 target 으로 맞춘다(async).
+// 쿠팡 PDP 의 수량 컨트롤은 React 제어 input + 증가/감소 버튼이다.
+// ⚠️ 함정: 버튼 '텍스트' 라벨이 뒤바뀌어 있다("수량빼기" 버튼이 실제로는 +).
+//    실제 기능은 안쪽 <i> 아이콘(icon-plus=증가 / icon-minus=감소)을 따른다.
+// 전략: 아이콘으로 inc/dec 판정 → 매 클릭 후 값 재확인하며 목표까지 수렴.
+//       방향이 틀리면(거리 증가) 버튼을 자동 스왑, 값이 안 변하면(재고/한계) 중단.
+// 반환: { status: "success"|"partial"|"notfound", set?, want, clicks }.
+async function setQuantityInPage(target) {
+  const want = Math.max(1, Number(target) || 1);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const isVisible = (el) => !!(el && el.offsetParent !== null);
+  const readNum = (el) => {
+    const v = parseInt(((el && el.value) || "").trim(), 10);
+    return Number.isFinite(v) ? v : null;
+  };
+
+  // 수량 입력칸: 숫자값 input (검색창 name=q / hidden 제외). 보이는 것 우선.
+  const qtyInputs = Array.from(document.querySelectorAll("input")).filter(
+    (el) => el.name !== "q" && el.type !== "hidden" && /^\d+$/.test(((el.value) || "").trim()),
+  );
+  const qtyInput = qtyInputs.find(isVisible) || qtyInputs[0] || null;
+
+  // 스테퍼 버튼 후보: 아이콘(icon-plus/minus) 또는 라벨로. 보이는 것 우선, 없으면 전체.
+  // (백그라운드 탭에서 레이아웃 미계산으로 offsetParent 가 null 일 수 있어 하드 필터하지 않음)
+  const candAll = Array.from(document.querySelectorAll("button")).filter(
+    (b) =>
+      b.querySelector("i[class*='icon-plus'],i[class*='icon-minus']") ||
+      /수량\s*더하기|수량\s*빼기|수량\s*증가|수량\s*감소/.test(b.textContent || ""),
+  );
+  const candVis = candAll.filter(isVisible);
+  const cands = candVis.length ? candVis : candAll;
+
+  if (!qtyInput || cands.length === 0) {
+    return {
+      status: qtyInput && cands.length ? "partial" : "notfound",
+      set: readNum(qtyInput),
+      want,
+    };
+  }
+
+  // 아이콘 클래스로 inc/dec 판정(라벨 신뢰 불가). 못 찾으면 후보 순서로 배정.
+  let incBtn = cands.find((b) => b.querySelector("i[class*='icon-plus']")) || null;
+  let decBtn = cands.find((b) => b.querySelector("i[class*='icon-minus']")) || null;
+  if (!incBtn) incBtn = cands.find((b) => b !== decBtn) || cands[0];
+  if (!decBtn) decBtn = cands.find((b) => b !== incBtn) || cands[0];
+
+  // 목표까지 한 클릭씩 수렴(자기보정: 역방향이면 스왑, 정체면 중단).
+  let clicks = 0;
+  let swapped = false;
+  let lastDist = null;
+  let stuck = 0;
+  const MAX = 99;
+  while (clicks < MAX) {
+    const cur = readNum(qtyInput);
+    if (cur == null || cur === want) break;
+    const dist = Math.abs(cur - want);
+    if (lastDist != null) {
+      if (dist > lastDist && !swapped) {
+        const t = incBtn;
+        incBtn = decBtn;
+        decBtn = t;
+        swapped = true;
+      } else if (dist === lastDist) {
+        if (++stuck >= 2) break;
+      } else {
+        stuck = 0;
+      }
+    }
+    lastDist = dist;
+    const btn = cur < want ? incBtn : decBtn;
+    if (!btn) break;
+    btn.click();
+    clicks++;
+    await sleep(120);
+  }
+
+  const after = readNum(qtyInput);
+  return { status: after === want ? "success" : "partial", set: after, want, clicks };
 }
 
 function delay(ms) {
@@ -75,16 +157,50 @@ async function clickWithRetry(tabId) {
   return { ok: false };
 }
 
+// 수량이 렌더될 때까지 짧게 재시도하며 target 으로 맞춘다.
+async function setQuantityWithRetry(tabId, target) {
+  for (let i = 0; i < CLICK_ATTEMPTS; i++) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: setQuantityInPage,
+        args: [target],
+      });
+      const r = injected && injected[0] && injected[0].result;
+      if (r && (r.status === "success" || r.status === "partial")) return r;
+    } catch (e) {
+      // 페이지 로딩 중 → 재시도
+    }
+    await delay(CLICK_GAP_MS);
+  }
+  return { status: "notfound" };
+}
+
 async function processItem(item) {
   const name = item.ingredient;
   const url = item.productUrl;
+  const mode = item.addMode === "adjust" ? "adjust" : "direct";
+  const qty = Math.max(1, Number(item.quantity) || 1);
   if (!url) {
     return { itemName: name, status: "skipped", message: "상품 URL이 없어 건너뛰었습니다." };
   }
+  // adjust(수량조정) 여부. 탭은 백그라운드로 연다(direct 와 동일, 화면 방해 없음).
+  const isAdjust = mode === "adjust" && qty > 1;
   let tab;
   try {
     tab = await chrome.tabs.create({ url, active: false });
     await waitForTabComplete(tab.id);
+    // adjust 모드: 담기 전에 수량을 맞춘다. (실패해도 담기는 시도하되 메시지로 알림)
+    let qtyNote = "";
+    if (isAdjust) {
+      await delay(400); // 수량 컨트롤 하이드레이션 여유.
+      const q = await setQuantityWithRetry(tab.id, qty);
+      if (q.status === "notfound") qtyNote = ` (수량 조절칸을 못 찾아 기본 수량으로 담음, 목표 ${qty}개)`;
+      else if (q.status === "partial") qtyNote = ` (수량 ${q.set ?? "?"}/${qty}개까지만 조절됨)`;
+      else qtyNote = ` (수량 ${qty}개)`;
+      // 수량 변경 후 쿠팡이 로딩(옵션/가격 재계산)을 끝내야 담기에 새 수량이 반영된다.
+      await delay(QTY_SETTLE_MS);
+    }
     const res = await clickWithRetry(tab.id);
     if (res.ok) {
       // 클릭 직후 바로 닫으면 담기 요청(비동기)이 취소될 수 있어, 잠시 대기 후 닫는다.
@@ -96,7 +212,7 @@ async function processItem(item) {
         itemName: name,
         productUrl: url,
         status: "success",
-        message: "장바구니 담기 완료. (결제는 진행하지 않음)",
+        message: "장바구니 담기 완료." + qtyNote + " (결제는 진행하지 않음)",
       };
     }
     return {
@@ -127,25 +243,36 @@ function sendProgress(senderTabId, reqId, payload) {
 
 async function executeCart(items, senderTabId, reqId) {
   const total = items.length;
-  const results = [];
+  const results = new Array(total);
 
-  for (let i = 0; i < total; i++) {
-    sendProgress(senderTabId, reqId, {
-      phase: "item-start",
-      index: i,
-      total,
-      itemName: items[i].ingredient,
-    });
-    const r = await processItem(items[i]);
-    results.push(r);
-    sendProgress(senderTabId, reqId, {
-      phase: "item-done",
-      index: i,
-      total,
-      done: results.length,
-      result: r,
-    });
+  // 동시 실행 상한(CONCURRENCY)을 둔 워커 풀: 항목을 병렬로 처리하되 한꺼번에 다 열지는 않는다.
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= total) return;
+      sendProgress(senderTabId, reqId, {
+        phase: "item-start",
+        index: i,
+        total,
+        itemName: items[i].ingredient,
+      });
+      const r = await processItem(items[i]);
+      results[i] = r;
+      done++;
+      sendProgress(senderTabId, reqId, {
+        phase: "item-done",
+        index: i,
+        total,
+        done,
+        result: r,
+      });
+    }
   }
+  const workers = [];
+  for (let k = 0; k < Math.min(CONCURRENCY, total); k++) workers.push(worker());
+  await Promise.all(workers);
 
   const success = results.filter((r) => r.status === "success").length;
   const failed = results.filter((r) => r.status === "failed").length;
