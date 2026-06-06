@@ -9,6 +9,7 @@
 
 import type {
   AgentPipelineItem,
+  FreshnessLevel,
   FridgeMateRequest,
   NutritionVerification,
   PantryItem,
@@ -21,6 +22,12 @@ import type {
 export interface ChatRequest {
   message: string;
   budget_limit?: number | null;
+  ingredient_entries?: {
+    name: string;
+    amount: string;
+    expiration_date: string; // "YYYY-MM-DD"
+    storage_type: string;
+  }[];
 }
 
 interface BackendPantryItem {
@@ -47,10 +54,24 @@ interface BackendLog {
   result?: Record<string, unknown>;
   [k: string]: unknown;
 }
+interface BackendPantryAnalysisItem {
+  name: string;
+  category?: string;
+  freshness?: FreshnessLevel;
+  amount?: string | null;
+  expiry_label?: string | null;
+  note?: string | null;
+}
 export interface ChatState {
   user_input?: string;
   budget_limit?: number | null;
   pantry_items?: BackendPantryItem[];
+  // 새 Pantry Agent가 UI용으로 생성하는 분석 결과 (backend/app/tools/pantry_tools.build_pantry_analysis)
+  pantry_analysis?: {
+    items?: BackendPantryAnalysisItem[];
+    priority_use?: string[];
+    summary?: string;
+  };
   meal_plan?: {
     strategy?: string;
     days?: { day?: string; meals?: BackendMeal[] }[];
@@ -76,7 +97,16 @@ export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
   const goal = req.goal?.trim();
   // 백엔드 supervisor 는 "레시피/요리" 단어가 있으면 recipe 노드로만 가므로 제외(전체 흐름=meal).
   const message = `냉장고에 ${names} 있어.${goal ? ` ${goal}` : ""} 식단 짜줘`;
-  return { message, budget_limit: req.budgetKrw ?? null };
+  return {
+    message,
+    budget_limit: req.budgetKrw ?? null,
+    ingredient_entries: req.ingredientEntries?.map((e) => ({
+      name: e.name,
+      amount: e.amount,
+      expiration_date: e.expirationDate,
+      storage_type: e.storageType,
+    })),
+  };
 }
 
 // ── 응답 매퍼: ChatState(snake) → RunResponse(camel) ────────────────────────
@@ -107,16 +137,37 @@ export function mapChatToRunResponse(
   req: FridgeMateRequest,
 ): RunResponse {
   const pantryRaw = state.pantry_items ?? [];
-  const priorityUse = pantryRaw
-    .filter((p) => p.expiry_priority === "high")
-    .map((p) => p.name);
 
-  const pantryItems: PantryItem[] = pantryRaw.map((p) => ({
-    name: p.name,
-    category: "재료", // 백엔드 미제공 → 일반 라벨
-    freshness: p.expiry_priority === "high" ? "soon" : "fresh",
-    amount: p.amount !== undefined ? `${p.amount}${p.unit ?? ""}` : undefined,
-  }));
+  // 새 Pantry Agent의 pantry_analysis가 있으면 그것을 우선 사용(snake→camel),
+  // 없으면 기존 pantry_items 기반으로 fallback.
+  const pa = state.pantry_analysis;
+  const usePa = Boolean(pa?.items && pa.items.length > 0);
+
+  const priorityUse = usePa
+    ? pa!.priority_use ?? []
+    : pantryRaw.filter((p) => p.expiry_priority === "high").map((p) => p.name);
+
+  const pantryItems: PantryItem[] = usePa
+    ? pa!.items!.map((it) => ({
+        name: it.name,
+        category: it.category ?? "재료",
+        freshness: it.freshness ?? "fresh",
+        amount: it.amount ?? undefined,
+        expiryLabel: it.expiry_label ?? undefined, // 예: "3일 남음"
+        note: it.note ?? undefined, // 보관방법(예: "냉장 보관")
+      }))
+    : pantryRaw.map((p) => ({
+        name: p.name,
+        category: "재료", // 백엔드 미제공 → 일반 라벨
+        freshness: p.expiry_priority === "high" ? "soon" : "fresh",
+        amount: p.amount !== undefined ? `${p.amount}${p.unit ?? ""}` : undefined,
+      }));
+
+  const pantrySummary = usePa
+    ? pa!.summary ?? "입력한 재료를 분석했어요."
+    : priorityUse.length > 0
+      ? "유통기한이 가까운 재료를 우선 사용하는 식단이에요."
+      : "입력한 재료를 우선 사용하도록 구성했어요.";
 
   // 레시피 (중복 id 제거)
   const seen = new Set<string>();
@@ -200,9 +251,9 @@ export function mapChatToRunResponse(
       id: "pantry",
       order: 1,
       name: "Pantry Agent",
-      status: has(pantryRaw) ? "completed" : "pending",
-      message: has(pantryRaw) ? "재료 분석 완료" : "재료 분석 대기",
-      logs: logEvents("meal").filter((e) => e.includes("plan")),
+      status: pantryItems.length > 0 ? "completed" : "pending",
+      message: pantryItems.length > 0 ? "재료 분석 완료" : "재료 분석 대기",
+      logs: logEvents("pantry"),
     },
     {
       id: "recipe",
@@ -244,14 +295,11 @@ export function mapChatToRunResponse(
   return {
     runId: `chat_${Date.now()}`,
     mode: req.mode,
-    ingredients: pantryRaw.map((p) => p.name),
+    ingredients: pantryItems.map((p) => p.name),
     pantry: {
       items: pantryItems,
       priorityUse,
-      summary:
-        priorityUse.length > 0
-          ? "유통기한이 가까운 재료를 우선 사용하는 식단이에요."
-          : "입력한 재료를 우선 사용하도록 구성했어요.",
+      summary: pantrySummary,
     },
     recipes,
     mealPlan: {
