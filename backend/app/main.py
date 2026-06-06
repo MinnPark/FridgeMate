@@ -14,6 +14,10 @@ app.add_middleware(
 )
 graph = build_graph()
 
+# v3 멀티 엔드포인트 (additive) — 기존 /chat 유지 + /api/compose,run,stream,kpi 추가
+from app.v3.api import router as v3_router  # noqa: E402
+app.include_router(v3_router)
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., examples=["냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘"])
