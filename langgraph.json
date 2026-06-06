@@ -2,7 +2,6 @@
   "dependencies": ["./backend"],
   "graphs": {
     "fridgemate": "./backend/app/graph/orchestrator.py:build_graph",
-    "fridgemate_v3": "./backend/app/v3/graph.py:build_state_graph",
     "rag_agent": "./backend/app/rag/agent.py:build_rag_graph"
   },
   "env": "./backend/.env"
