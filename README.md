@@ -2,11 +2,13 @@
 
 FridgeMate AI는 냉장고 재료 입력부터 식단 추천, 레시피 검색, 부족 재료 산출, 쿠팡 장바구니 후보 생성까지 연결하는 AI Agent MVP입니다.
 
+> ▶ **설치·구동은 [RUN.md](RUN.md) 를 그대로 따라하면 됩니다** — venv 생성 → 의존성 설치(전부 버전 고정) → `.env` → 백엔드/프론트/Studio 기동까지 전 과정 상세.
+
 ## 프로젝트 조건 매핑
 
 - 고급 Prompt Engineering: Supervisor, Plan-and-Execute, ReAct, Reflexion, HyDE, RAG-Fusion
 - Function Calling / Tool Calling: pantry parsing, nutrition lookup, missing ingredient calculation, shopping search, cart deeplink
-- RAG + VectorDB: Recipe Agent에 ChromaDB 연결 지점을 분리해 둔 mock RAG 구조
+- RAG + VectorDB: bge-m3 임베딩 + ChromaDB(recipe_db 1,693건) + HyDE/RAG-Fusion/RRF 실연결 (mock 아님)
 - Agent 구조: Orchestrator, Meal Agent, Recipe Agent, Shopping Agent
 
 ## 구조
@@ -27,31 +29,25 @@ backend/
     schemas/
 ```
 
-## 실행
+## 실행 (요약 — 전 과정 상세는 [RUN.md](RUN.md))
 
-```bash
+> 포트: 백엔드 **8742** · 프론트 8743 · Studio 8744. RAG 의존성은 `requirements.txt` 에 통합(별도 requirements-rag.txt 없음).
+
+```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+.venv\Scripts\activate                    # mac/linux: source .venv/bin/activate
+pip install -r requirements.txt           # 전부 버전 고정 — fresh clone 동일 재현(검증됨)
+copy .env.example .env                     # -> .env 에 LMSTUDIO_API_KEY, OPENROUTER_API_KEY 채우기
+python -m uvicorn app.main:app --port 8742 # 반드시 이 venv python 으로 (openai 등 deps)
+# 확인: curl http://127.0.0.1:8742/health   ·   Swagger http://127.0.0.1:8742/docs
 ```
 
-Recipe Agent를 실제 ChromaDB VectorDB에 연결할 때만 선택 의존성을 추가로 설치합니다.
-
-```bash
-pip install -r requirements-rag.txt
-```
-
-```bash
-curl -X POST http://127.0.0.1:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘","budget_limit":30000,"ingredient_entries":[{"name":"두부","amount":"1모","expiration_date":"2026-06-08","storage_type":"냉장 보관"}]}'
-```
-
-현재 코드는 외부 API 없이 agent 흐름을 보여주는 mock MVP입니다. 이후 Claude, Cohere embedding, ChromaDB, PostgreSQL, Coupang 연동을 각 tool 함수 내부에 연결하면 됩니다.
+RAG는 **실연결**입니다: bge-m3 임베딩(LM Studio) + ChromaDB(recipe_db 1,693건 동봉) + HyDE/RAG-Fusion/RRF. 요청 예시·프론트·Studio 기동은 [RUN.md](RUN.md), LLM 티어링(오케스트레이션 OpenRouter / 서브쿼리 LM Studio)·런타임 주의는 [docs/rag-llm-tiering.md](docs/rag-llm-tiering.md).
 
 ## LLM 연결
+
+> 현행 구성은 `backend/.env.example` + [docs/rag-llm-tiering.md](docs/rag-llm-tiering.md) 가 정본: **오케스트레이션=OpenRouter(Claude)**, **RAG 서브쿼리(HyDE/Fusion)=LM Studio 로컬 qwen2.5-7b**, 임베딩=bge-m3(LM Studio). 아래는 일반 설명.
 
 기본값은 API 키 없이 동작하는 deterministic fallback입니다. 실제 LLM을 붙일 때는 백엔드 실행 전에 환경변수를 설정합니다.
 

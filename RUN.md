@@ -35,10 +35,13 @@ curl http://localhost:8742/health
 `backend/.env.example` 복사 후:
 | 키 | 용도 | 필수 |
 |---|---|---|
-| `LMSTUDIO_API_KEY` | bge-m3 임베딩(LM Studio) | 필수 |
-| `OPENROUTER_API_KEY` | HyDE/RAG-Fusion LLM | 권장(없으면 plain 폴백) |
+| `LMSTUDIO_API_KEY` | bge-m3 임베딩 **+ HyDE/Fusion 서브쿼리 LLM**(LM Studio 로컬 qwen2.5-7b) | 필수 |
+| `OPENROUTER_API_KEY` | **오케스트레이션 LLM**(라우팅/식단구성, Claude) | 권장(없으면 폴백) |
 | `FOOD_SAFETY_API_KEY` / `MAFRA_API_KEY` | 사전임베딩 재수집 시 | 선택 |
-나머지(EMBED_PROVIDER=local, LMSTUDIO_BASE_URL, EMBED_SIG, CHROMADB_PATH)는 기본값 채워져 있음.
+나머지(EMBED_PROVIDER=local, LMSTUDIO_BASE_URL, EMBED_SIG, CHROMADB_PATH, RAG_LLM_PROVIDER=local, LOCAL_MODEL_DEFAULT=qwen2.5-7b-instruct)는 기본값 채워져 있음.
+
+> **LLM 티어링**: 큰 오케스트레이션=OpenRouter(Claude), 작은 서브쿼리(HyDE 가상답변/Fusion 멀티쿼리)=LM Studio 로컬 서브모델. 상세 `docs/rag-llm-tiering.md`.
+> **주의**: 반드시 `backend/.venv` python 으로 기동(`openai` 등 deps). 다른 python으로 띄우면 `No module named 'openai'` -> RAG가 조용히 일반검색 폴백(`via=None`). `.venv\Scripts\activate` 후 실행하거나 `.venv\Scripts\python.exe -m uvicorn ...`.
 
 ## 2. 백엔드 (FastAPI + RAG) — 8742
 - `uvicorn app.main:app --reload --port 8742` (backend/ 에서)
