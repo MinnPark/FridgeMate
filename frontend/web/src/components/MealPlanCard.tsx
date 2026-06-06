@@ -38,11 +38,11 @@ export function MealPlanCard({ mealPlan, mode, nutrition }: Props) {
           {MODE_LABEL[mode]}
         </span>
         <p className="text-xs text-white/60">
-          하루 단백질 {nutrition.protein.current}
+          하루 단백질 {Math.round(nutrition.protein.current)}
           {nutrition.protein.unit}
         </p>
         <p className="text-xs text-white/60">
-          칼로리 {nutrition.calories.current}
+          칼로리 {Math.round(nutrition.calories.current)}
           {nutrition.calories.unit}
         </p>
       </div>
