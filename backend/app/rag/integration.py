@@ -62,8 +62,12 @@ def to_contract(d: dict) -> dict:
       qty → amount, carb → carbs, distance → score, source_url → citation_url.
     """
     s = _score_of(d)
+    # amount 는 숫자 보장(미상=1). 기존 calculate_missing_ingredients 가 amount(None) 에
+    # None-int 연산으로 crash 하므로(키 존재+값 None 이면 .get default 안 먹음) 경계에서 코어스.
     ingredients = [
-        {"name": i.get("name", ""), "amount": i.get("qty"), "unit": i.get("unit", "")}
+        {"name": i.get("name", ""),
+         "amount": i["qty"] if isinstance(i.get("qty"), (int, float)) else 1,
+         "unit": i.get("unit", "")}
         for i in (d.get("ingredients") or [])
         if isinstance(i, dict)
     ]
