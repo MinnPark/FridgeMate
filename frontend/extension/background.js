@@ -10,7 +10,7 @@ const NAV_TIMEOUT_MS = 20000;
 const CLICK_ATTEMPTS = 10; // 버튼이 렌더될 때까지 짧게 재시도
 const CLICK_GAP_MS = 350;
 const SETTLE_MS = 1000; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
-const QTY_SETTLE_MS = 1000; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전).
+const QTY_SETTLE_MS = 1500; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전). 1000은 짧아 1개로 담기는 사례 → 1500.
 const CONCURRENCY = 5; // 동시에 처리할 상품 탭 수(속도↑). 너무 크면 쿠팡 봇 의심/리소스 부담.
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
