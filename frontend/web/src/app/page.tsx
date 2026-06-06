@@ -51,6 +51,7 @@ export default function HomePage() {
       const req: FridgeMateRequest = {
         ...request,
         ingredients: ingredients.map((i) => i.name).join(", "),
+        ingredientEntries: ingredients, // 세부정보(용량/유통기한/보관)도 함께 전달
       };
       const { data, notice } = await runPipeline(req);
       if (!isValidRunResponse(data)) {
