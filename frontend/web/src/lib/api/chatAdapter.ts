@@ -95,8 +95,21 @@ export interface ChatState {
 export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
   const names = req.ingredients.trim();
   const goal = req.goal?.trim();
-  // 백엔드 supervisor 는 "레시피/요리" 단어가 있으면 recipe 노드로만 가므로 제외(전체 흐름=meal).
-  const message = `냉장고에 ${names} 있어.${goal ? ` ${goal}` : ""} 식단 짜줘`;
+
+  // 구조화된 조건들을 자연어로 변환
+  // ⚠️ "레시피/요리" 단어 금지 — supervisor 가 recipe 노드로만 라우팅됨
+  const conditions: string[] = [];
+  if (req.peopleCount)         conditions.push(`${req.peopleCount}인분`);
+  if (req.maxCookingMinutes)   conditions.push(`조리 ${req.maxCookingMinutes}분 이내`);
+  if (req.calorieTargetKcal)   conditions.push(`칼로리 ${req.calorieTargetKcal}kcal`);
+  if (req.proteinTargetGram)   conditions.push(`단백질 ${req.proteinTargetGram}g`);
+  if (req.excludedIngredients) conditions.push(`${req.excludedIngredients} 제외`);
+  if (req.deliveryPreference)  conditions.push(`배송 ${req.deliveryPreference}`);
+  if (req.mode && req.mode !== "today") conditions.push(`${req.mode} 모드`);
+
+  const condStr = conditions.length > 0 ? ` ${conditions.join(", ")}.` : "";
+  const message = `냉장고에 ${names} 있어.${goal ? ` ${goal}.` : ""}${condStr} 식단 짜줘`;
+
   return {
     message,
     budget_limit: req.budgetKrw ?? null,
