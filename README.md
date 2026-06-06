@@ -46,7 +46,7 @@ pip install -r requirements-rag.txt
 ```bash
 curl -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message":"냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘","budget_limit":30000}'
+  -d '{"message":"냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘","budget_limit":30000,"ingredient_entries":[{"name":"두부","amount":"1모","expiration_date":"2026-06-08","storage_type":"냉장 보관"}]}'
 ```
 
 현재 코드는 외부 API 없이 agent 흐름을 보여주는 mock MVP입니다. 이후 Claude, Cohere embedding, ChromaDB, PostgreSQL, Coupang 연동을 각 tool 함수 내부에 연결하면 됩니다.
