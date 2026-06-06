@@ -1,0 +1,26 @@
+# 쓰레기(재생성물)만 무시. 데이터(data/chroma)/.env.example 는 의도적으로 추적 = 팀 공유.
+# (실제 .env 비밀키 파일만 무시 — example 은 추적)  by neocello-ku
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / Next
+node_modules/
+.next/
+out/
+
+# Jupyter / OS
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# 실제 비밀키 .env (example 은 추적 — 위 negation)
+.env
+.env.local
+!.env.example
+!frontend/web/.env.local.example
