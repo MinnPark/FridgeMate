@@ -1,6 +1,6 @@
 """RAG 에이전트 — 독립 실행 가능한 LangGraph 서브그래프.
 
-지금까지 RAG 는 메인 그래프(fridgemate_v3) 안에서 함수(smart_search→hyde/fusion)로
+지금까지 RAG 는 메인 그래프(the main graph) 안에서 함수(smart_search→hyde/fusion)로
 흩어져 호출됐다. 이를 **단일 에이전트**로 분리: 자체 state + 내부 오케스트레이션.
 
 내부 흐름:

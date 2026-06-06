@@ -1,4 +1,4 @@
-"""RAG 엔진 (이식 — fridge-mate B파트). bge-m3 임베딩 + HyDE/RAG-Fusion/RRF + recipe_db.
+"""RAG 엔진 (이식 (B파트 RAG)). bge-m3 임베딩 + HyDE/RAG-Fusion/RRF + recipe_db.
 
 자기완결 패키지: import 시 .env 자동 로드(os.getenv 설정 사용). dotenv 미설치/부재 시 무시.
 필요 env: EMBED_PROVIDER=local · LMSTUDIO_BASE_URL · LMSTUDIO_API_KEY · EMBED_MODEL_LOCAL ·

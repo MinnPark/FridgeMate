@@ -68,7 +68,7 @@ def _hash_vector(text: str, dim: int = _EMBED_DIM) -> list[float]:
     return [v / norm for v in summed]
 
 
-class CohereEmbedder:
+class Embedder:
     """Cohere 래퍼 + 명시적 input_type 분리 + Redis 캐시(옵션) + mock fallback."""
 
     def __init__(self, *, mock: Optional[bool] = None):

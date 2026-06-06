@@ -13,7 +13,7 @@ import chromadb
 
 from app.rag.data.fetch_cookrcp import fetch_cookrcp
 from app.rag.data.fetch_rda import fetch_rda
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 
 COLLECTION_NAME = "recipe_db"
 SUB_COLLECTION_NAME = "ingredient_sub"
@@ -49,7 +49,7 @@ async def upsert_recipes(
     "API로 외부 데이터를 계속 주입" 하는 경로의 정본. 같은 id 재주입 시 갱신, 새 id 추가.
     embed_sig 불일치(다른 임베더로 만든 컬렉션에 섞어넣기) 는 검색을 깨므로 거부한다.
     """
-    embedder = CohereEmbedder()
+    embedder = Embedder()
     sig = embedder.signature
     client = get_chroma_client()
     col = client.get_or_create_collection(
@@ -101,7 +101,7 @@ async def build_recipe_db(limit: int = 200) -> dict:
     recipes = list(seen.values())
     print(f"[indexer] 정규화 완료: {len(recipes)} 건")
 
-    embedder = CohereEmbedder()
+    embedder = Embedder()
     texts = [r["embed_text"] for r in recipes]
     print(f"[indexer] 임베딩 중... (mock={embedder.mock})")
     embeddings = await embedder.embed_documents(texts)

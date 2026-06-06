@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import COLLECTION_NAME, get_chroma_client
 
 
@@ -31,7 +31,7 @@ async def search_recipes(
     cuisine_filter: Optional[str] = None,
     max_time: Optional[int] = None,
 ) -> list[dict]:
-    embedder = CohereEmbedder()
+    embedder = Embedder()
     query_vec = await embedder.embed_query(query)
 
     # ChromaDB는 다중 조건 시 $and 래핑 필수

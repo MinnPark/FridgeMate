@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import SUB_COLLECTION_NAME, _sanitize_metadata, get_chroma_client
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "ingredient_sub_seed.json"
@@ -24,7 +24,7 @@ def _embed_text(entry: dict) -> str:
 
 
 async def ensure_sub_indexed(force: bool = False) -> dict:
-    emb = CohereEmbedder()
+    emb = Embedder()
     sig = emb.signature
     client = get_chroma_client()
     col = client.get_or_create_collection(
@@ -55,7 +55,7 @@ async def ensure_sub_indexed(force: bool = False) -> dict:
 
 async def find_substitutes(ingredient: str, *, k: int = 3) -> list[dict]:
     """부족 재료명 → 대체재 후보 (유사검색). substitute_finder 진입점."""
-    emb = CohereEmbedder()
+    emb = Embedder()
     qv = await emb.embed_query(ingredient)
     client = get_chroma_client()
     col = client.get_or_create_collection(SUB_COLLECTION_NAME, metadata={"hnsw:space": "cosine"})

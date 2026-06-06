@@ -15,7 +15,7 @@ import math
 import time
 from typing import Optional
 
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import COLLECTION_NAME, get_chroma_client
 
 PREF_COLLECTION = "user_preference"
@@ -42,7 +42,7 @@ async def record_preference(
     meta: Optional[dict] = None,
 ) -> None:
     """사용자가 수락/선호한 레시피 1건을 선호 벡터로 upsert."""
-    emb = CohereEmbedder()
+    emb = Embedder()
     vec = (await emb.embed_documents([embed_text]))[0]
     md: dict = {"user_id": user_id, "recipe_id": recipe_id, "accepted": accepted, "ts": time.time()}
     if meta:

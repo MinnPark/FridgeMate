@@ -28,7 +28,7 @@ load_dotenv()
 
 from app.rag.data.fetch_cookrcp import fetch_cookrcp, _load_seed
 from app.rag.data.fetch_rda import fetch_rda
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import upsert_recipes
 
 LIMIT = int(os.getenv("INGEST_LIMIT", "1200"))  # 식약처 전체 ~1,146건
@@ -84,7 +84,7 @@ async def main():
         return
 
     print("=== 2) 증분 주입 (id upsert, 누적) ===")
-    emb = CohereEmbedder()
+    emb = Embedder()
     print(f"  embedder: provider={emb.provider} mock={emb.mock} sig={emb.signature}")
     res = await upsert_recipes(recs)
     print(f"  recipe_db: {res['before']} → {res['after']} (added {res['added']}, submitted {res['submitted']})")

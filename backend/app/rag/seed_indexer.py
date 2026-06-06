@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from app.rag._normalize import make_embed_text
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import COLLECTION_NAME, _sanitize_metadata, get_chroma_client
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "seed_recipes.json"
@@ -21,7 +21,7 @@ SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "seed_recipes.json"
 async def ensure_seed_indexed(force: bool = False) -> dict:
     # 임베더 시그니처 가드 — 인덱스/쿼리 임베딩 공간 불일치(예: mock↔bge-m3) 자동 감지·재인덱싱.
     # 같은 컬렉션을 다른 임베더로 쿼리하면 검색이 깨지므로(공간 불일치) 시그니처 바뀌면 재구축.
-    embedder = CohereEmbedder()
+    embedder = Embedder()
     sig = embedder.signature
     client = get_chroma_client()
     col = client.get_or_create_collection(

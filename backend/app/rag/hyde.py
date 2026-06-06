@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.rag.embedder import CohereEmbedder
+from app.rag.embedder import Embedder
 from app.rag.indexer import COLLECTION_NAME, get_chroma_client
 from app.rag.retriever import _decode_meta, search_recipes
 from app.rag._llm import call_llm, llm_enabled
@@ -35,7 +35,7 @@ async def hyde_search(
     if not hypo_doc:
         return await search_recipes(query, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
 
-    embedder = CohereEmbedder()
+    embedder = Embedder()
     hypo_vec = (await embedder.embed_documents([hypo_doc]))[0]
 
     conds: list[dict] = []
