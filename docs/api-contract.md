@@ -236,9 +236,30 @@
 | `budgetKrw` | number | ❌ | 예산(원) |
 | `coupangCartUrl` | string | ❌ | 장바구니 URL |
 
-**ShoppingItem**: `name`✅, `quantity`✅("1kg"), `priceKrw`✅ / 선택: `reason`, `delivery`("내일 도착(로켓배송)"), `isAlternative`, `alternativeFor`, `productUrl`(쿠팡 상품 상세 URL), `score`(ScoreInfo)
+**ShoppingItem**: `name`✅, `quantity`✅("1kg", 표시용 문자열), `priceKrw`✅ / 선택: `reason`, `delivery`("내일 도착(로켓배송)"), `isAlternative`, `alternativeFor`, `productUrl`(쿠팡 상품 상세 URL), `addMode`("direct"\|"adjust"), `purchaseCount`(담을 정수 개수), `score`(ScoreInfo)
 
 > `productUrl`(개별 상품 페이지 URL)이 있으면 Chrome 확장이 자동 담기를 시도하고, 없으면 그 품목은 `skipped`.
+
+#### 3.6.1 쿠팡 자동 담기(확장) 실행용 필드 — `direct` / `adjust`
+
+확장이 상품을 담는 방식은 두 가지이며, **"이 URL이 필요 수량을 이미 품고 있는가"는 상품 메타데이터라 프론트가 판단할 수 없다.** 그래서 URL을 고른 백엔드(상품 검색/부족재료 해소 단계)가 방식을 알려준다.
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `productUrl` | string | (담기 대상) | 쿠팡 상품 페이지 URL. 없으면 그 품목은 `skipped` |
+| `addMode` | string | ❌ | `direct` \| `adjust`. 없으면 프론트가 `purchaseCount`로 추정(아래) |
+| `purchaseCount` | int | ❌ | 담을 **정수 개수**. `adjust` 시 페이지 수량 스테퍼를 이 값으로 맞춘다. 없으면 1 |
+
+- **`direct`**: 수량/옵션이 URL(`itemId`·`vendorItemId`)에 이미 박혀 있어 그대로 담으면 되는 경우. (예: 계란 "30구 2판" 옵션 URL)
+- **`adjust`**: 기본 상품 페이지라, 확장이 **수량 스테퍼를 `purchaseCount`로 맞춘 뒤** 담아야 하는 경우.
+
+> 같은 상품이라도 수량이 별도 옵션(`itemId`)으로 존재하는지 여부는 상품 메타데이터다.
+> 따라서 `addMode`는 **백엔드가 지정**하는 것이 정확하다.
+
+**`addMode` 미제공 시 프론트 fallback(차선):** `purchaseCount <= 1` → `direct`, `> 1` → `adjust`.
+단, 수량이 URL에 박힌 상품을 `adjust`로 오인할 수 있어 완벽하지 않으므로 **가능하면 `addMode` 명시를 권장**한다.
+
+> 프론트 매핑: 이 값들은 `chatAdapter`에서 `CartExecuteItem.{productUrl, quantity, addMode}`로 전달되어 확장이 사용한다(`frontend/extension/background.js`).
 
 ### 3.7 `pipeline` (AgentPipelineItem[]) — 5개 고정
 
@@ -250,6 +271,10 @@
 | `status` | string | ✅ | `completed`\|`running`\|`pending`\|`failed` |
 | `message` | string | ✅ | 현재 상태 문구 |
 | `logs` | string[] | ❌ | 단계별 로그 |
+
+> `executor` 단계는 **실제 쿠팡 담기(Chrome 확장)** 를 의미한다. 분석 파이프라인은 `shopping`까지이고,
+> `executor` 완료는 백엔드가 아니라 **사용자가 "장바구니 담기 실행"을 눌러 확장이 성공했을 때** 프론트가 표시한다.
+> 따라서 백엔드는 `executor`를 `pending`으로 둬도 된다.
 
 ### 3.8 `ScoreInfo` (전부 선택, 표시 전용)
 

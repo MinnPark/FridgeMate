@@ -6,6 +6,7 @@ LLM 비활성 시: 일반 retriever 로 fallback.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Optional
 
 from app.rag.retriever import search_recipes
@@ -13,6 +14,45 @@ from app.rag._llm import call_llm, llm_enabled, rag_subquery_provider
 
 MULTI_QUERY_SYSTEM_PROMPT_NAME = "rag_fusion_multi_query"
 RRF_K_CONST = 60
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_KOREAN_RE = re.compile(r"[가-힣]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+_LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
+_META_TERMS = ("규칙", "검색 쿼리", "생성任务", "사용자", "출력", "줄바꿈")
+
+
+def _sanitize_queries(raw: str, original_query: str, limit: int = 4) -> list[str]:
+    """로컬 LLM의 다국어 지시문 반복을 제거하고 검색 가능한 한국어 쿼리만 남긴다."""
+    queries: list[str] = []
+    for line in raw.splitlines():
+        candidate = _LIST_PREFIX_RE.sub("", line).strip().strip("\"'`")
+        compact_length = len(candidate.replace(" ", ""))
+        if (
+            not candidate
+            or _CJK_RE.search(candidate)
+            or _LATIN_RE.search(candidate)
+            or not _KOREAN_RE.search(candidate)
+            or not 2 <= compact_length <= 30
+            or any(term in candidate for term in _META_TERMS)
+        ):
+            continue
+        if candidate not in queries:
+            queries.append(candidate)
+        if len(queries) == limit:
+            return queries
+
+    fallback_queries = [
+        original_query.strip(),
+        f"{original_query.strip()} 레시피",
+        f"{original_query.strip()} 추천",
+        f"{original_query.strip()} 요리",
+    ]
+    for candidate in fallback_queries:
+        if candidate and candidate not in queries:
+            queries.append(candidate)
+        if len(queries) == limit:
+            break
+    return queries
 
 
 def reciprocal_rank_fusion(result_lists: list[list[dict]], k_top: int = 5) -> list[dict]:
@@ -46,14 +86,33 @@ async def rag_fusion_search(
         fallback="",
         max_tokens=200,
     )
-    queries = [q.strip() for q in raw.splitlines() if q.strip()][:4]
+    queries = _sanitize_queries(raw, query)
     if not queries:
         return await search_recipes(query, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
 
-    results = await asyncio.gather(*[
+    gathered = await asyncio.gather(*[
         search_recipes(q, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
         for q in queries
-    ])
+    ], return_exceptions=True)
+    results: list[list[dict]] = []
+    for subquery, result in zip(queries, gathered):
+        if isinstance(result, BaseException):
+            print(
+                f"[RAG/Fusion] subquery failed: q={subquery!r} "
+                f"error={type(result).__name__}: {result}",
+                flush=True,
+            )
+            continue
+        results.append(result)
+
+    if not results:
+        print(
+            "[RAG/Fusion] all subqueries failed; returning no results "
+            "so the agent workflow can continue",
+            flush=True,
+        )
+        return []
+
     fused = reciprocal_rank_fusion(results, k_top=k)
     for d in fused:
         d["_via"] = "rag_fusion"

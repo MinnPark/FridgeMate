@@ -218,6 +218,9 @@ export interface CartExecuteItem {
   searchUrl?: string;
   quantity?: number;
   optionText?: string;
+  // 담기 방식: "direct" = URL 옵션대로 바로 담기(수량 URL에 포함),
+  // "adjust" = 상품페이지에서 수량을 quantity 로 맞춘 뒤 담기. 미지정 시 direct.
+  addMode?: "direct" | "adjust";
 }
 
 export interface CartExecuteRequest {

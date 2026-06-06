@@ -18,10 +18,10 @@ import type {
 
 // 데모 진입 시 보여줄 기본 재료(용량/유통기한 포함). 사용자가 추가/삭제 가능.
 export const DEFAULT_INGREDIENT_ENTRIES: IngredientEntry[] = [
-  { name: "닭가슴살", amount: "500g", expirationDate: "2025-05-20", storageType: "냉장 보관" },
-  { name: "계란", amount: "10개", expirationDate: "2025-05-22", storageType: "냉장 보관" },
-  { name: "브로콜리", amount: "300g", expirationDate: "2025-05-18", storageType: "냉장 보관" },
-  { name: "두부", amount: "1모", expirationDate: "2025-05-16", storageType: "냉장 보관" },
+  { name: "닭가슴살", amount: "500g", expirationDate: "2026-08-01", storageType: "냉장 보관" },
+  { name: "계란", amount: "10개", expirationDate: "2026-08-01", storageType: "냉장 보관" },
+  { name: "브로콜리", amount: "300g", expirationDate: "2026-08-01", storageType: "냉장 보관" },
+  { name: "두부", amount: "1모", expirationDate: "2026-08-01", storageType: "냉장 보관" },
 ];
 
 export const DEMO_REQUEST: FridgeMateRequest = {
