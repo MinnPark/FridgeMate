@@ -90,7 +90,7 @@ function KeyBar({ label, m }: { label: string; m: NutrientMetric }) {
       <div className="mb-0.5 flex items-center justify-between text-xs">
         <span className="text-white/55">{label}</span>
         <span className="text-white/70">
-          <b className="text-white/90">{m.current}</b> / {m.target}
+          <b className="text-white/90">{Math.round(m.current)}</b> / {Math.round(m.target)}
           {m.unit}
         </span>
       </div>
@@ -120,7 +120,7 @@ function Bar({
           {icon} {label}
         </span>
         <span className="text-white/55">
-          {m.current} / {m.target} {m.unit}
+          {Math.round(m.current)} / {Math.round(m.target)} {m.unit}
         </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-white/10">

@@ -37,9 +37,16 @@ const config: Config = {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.4" },
         },
+        // 단계 완료 시 결과 카드가 부드럽게 떠오르며 등장.
+        reveal: {
+          "0%": { opacity: "0", transform: "translateY(14px) scale(0.975)" },
+          "55%": { opacity: "1" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
       },
       animation: {
         pulseGlow: "pulseGlow 1.6s ease-in-out infinite",
+        reveal: "reveal 2s cubic-bezier(0.16, 1, 0.3, 1) both",
       },
     },
   },
