@@ -65,5 +65,55 @@ OpenAI 계열 모델을 쓰려면 `FRIDGEMATE_LLM_PROVIDER=openai`, `OPENAI_API_
 - Orchestrator: Supervisor routing JSON 생성
 - Meal Agent: Plan-and-Execute 식단 계획 JSON 생성
 - Shopping Agent: Reflexion 실패 회고 JSON 생성
+- Coupang Product Ranker: 레시피 문맥을 고려한 쿠팡 상품 후보 판정
 
 API 키가 없거나 호출이 실패하면 같은 JSON 구조의 fallback으로 계속 실행됩니다.
+
+### LM Studio로 쿠팡 상품 판정 사용
+
+LM Studio에서 `qwen2.5-7b-instruct` 같은 **채팅 모델**을 로드하고 Local
+Server를 실행한 뒤 `backend/.env`를 다음처럼 설정합니다.
+
+```env
+FRIDGEMATE_LLM_PROVIDER=openai
+FRIDGEMATE_LLM_BASE_URL=http://127.0.0.1:1234/v1
+FRIDGEMATE_LLM_MODEL=qwen2.5-7b-instruct
+OPENAI_API_KEY=lm-studio
+```
+
+- `openai`는 OpenAI 회사 모델을 의미하는 것이 아니라 **OpenAI 호환 API
+  형식**을 의미합니다. 실제 요청 대상은 `FRIDGEMATE_LLM_BASE_URL`입니다.
+- 로컬 LM Studio는 기본적으로 실제 API 키가 필요하지 않습니다.
+  `OPENAI_API_KEY=lm-studio`는 현재 코드의 빈 값 검사를 통과시키는 더미
+  문자열입니다.
+- `FRIDGEMATE_LLM_MODEL`은 LM Studio의 `GET /v1/models` 응답에 표시된 모델
+  ID와 정확히 같아야 합니다.
+- `bge-m3`는 임베딩 모델이므로 상품 판정에 사용할 수 없습니다. 상품
+  판정에는 별도의 채팅 모델이 필요합니다.
+- 이 설정은 `app/llm.py`를 공유하는 Orchestrator, Meal, Shopping Agent와
+  쿠팡 상품 판정을 모두 LM Studio로 연결합니다.
+
+설정 변경 후 FastAPI를 완전히 다시 시작합니다.
+
+```cmd
+cd backend
+python -m uvicorn app.main:app --reload --port 8742
+```
+
+다른 포트를 사용한다면 프런트의 `NEXT_PUBLIC_API_BASE_URL`도 같은 포트로
+설정합니다.
+
+LM Studio 연결과 모델 ID는 다음 명령으로 확인할 수 있습니다.
+
+```cmd
+curl http://127.0.0.1:1234/v1/models
+```
+
+쿠팡 상품 판정은 부족 재료명뿐 아니라 해당 재료가 사용되는 레시피명,
+필요량, 배송 선호와 상품 후보 정보를 함께 비교합니다. LLM 판정 신뢰도가
+75% 이상이면 자동 선택하고, 사용자는 화면의 `후보 선택`에서 결과를 변경할
+수 있습니다. LLM 연결에 실패하면 기존 키워드·가격·배송 규칙의 최상위
+후보를 자동 선택하며, 이 결과 역시 사용자가 변경할 수 있습니다.
+
+화면에 `LLM 판정`이 표시되면 로컬 모델이 사용된 것이고, `규칙 판정`이
+표시되면 LLM 호출 실패 또는 비활성화로 fallback이 사용된 것입니다.
