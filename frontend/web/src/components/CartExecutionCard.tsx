@@ -130,6 +130,12 @@ export function CartExecutionCard({
     shopping.budgetKrw === undefined ||
     !hasConfirmedPrices ||
     searchedTotal <= shopping.budgetKrw;
+  // 예산 초과액(검색 후 가격이 확정된 경우에만 계산). 0 이하면 예산 이내.
+  const overBudgetAmount =
+    shopping.budgetKrw !== undefined && hasConfirmedPrices
+      ? searchedTotal - shopping.budgetKrw
+      : 0;
+  const isOverBudget = overBudgetAmount > 0;
 
   function buildExecItems(): CartExecuteItem[] {
     return pickedItems.map((item) => {
@@ -181,7 +187,8 @@ export function CartExecutionCard({
         missing.map((item) => ({
           ingredient: item.name,
           quantityText: item.quantity,
-          neededG: item.neededG,
+          neededAmount: item.neededAmount,
+          neededUnit: item.neededUnit,
           preference: deliveryPreference,
         })),
         (p: SearchProgress) => {
@@ -467,6 +474,15 @@ export function CartExecutionCard({
             <SmallBtn onClick={() => openCoupangCartPage()}>↗ 열기</SmallBtn>
           </div>
 
+          {/* 예산 초과 인라인 배너: 왼쪽 체크 해제로 조정(실시간 갱신) */}
+          {isOverBudget && (
+            <div className="mt-2 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+              ⚠️ 예산 {formatKRW(shopping.budgetKrw!)} 대비{" "}
+              <b>{formatKRW(overBudgetAmount)}</b> 초과예요. 왼쪽에서 담지 않을
+              품목의 체크를 해제해 조정하세요.
+            </div>
+          )}
+
           {/* 메인 실행 버튼 */}
           <button
             onClick={() => {
@@ -551,6 +567,11 @@ export function CartExecutionCard({
               {formatKRW(searchedTotal)}
             </b>
           </li>
+          {isOverBudget && (
+            <li className="rounded-lg bg-red-500/10 px-2 py-1 text-red-200">
+              ⚠️ 예산 {formatKRW(overBudgetAmount)} 초과 상태예요. 그래도 담을까요?
+            </li>
+          )}
         </ul>
         <ul className="mt-2 space-y-0.5 text-xs text-white/55">
           <li>• Chrome 확장 프로그램으로 쿠팡 장바구니 담기를 실행합니다.</li>

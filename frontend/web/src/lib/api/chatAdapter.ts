@@ -199,12 +199,19 @@ function formatMissingQuantity(
   return `${value}${unit ?? ""}`;
 }
 
+// 개수로 사는 과일류(무게→개 환산 대상). 무게/팩으로 파는 베리류(딸기·포도·블루베리 등)는 제외.
+const FRUITS = new Set([
+  "사과", "배", "바나나", "귤", "오렌지", "감", "단감", "홍시", "복숭아", "천도복숭아",
+  "자두", "키위", "레몬", "라임", "자몽", "망고", "참외", "멜론", "수박", "파인애플",
+  "석류", "아보카도", "살구", "한라봉", "천혜향", "유자", "모과", "무화과", "파파야",
+]);
+
 function mapMissingToShoppingItems(
   missing: NonNullable<ChatState["missing_ingredients"]>,
 ): ShoppingItem[] {
   const grouped = new Map<
     string,
-    { quantities: string[]; neededBy: Set<string>; totalG: number }
+    { quantities: string[]; neededBy: Set<string>; totalG: number; totalMl: number }
   >();
 
   for (const item of missing) {
@@ -214,29 +221,50 @@ function mapMissingToShoppingItems(
       quantities: [],
       neededBy: new Set<string>(),
       totalG: 0,
+      totalMl: 0,
     };
     const quantity = formatMissingQuantity(item.amount, item.unit);
     if (!current.quantities.includes(quantity)) current.quantities.push(quantity);
-    // 필요 총량: 단위가 '진짜 g/kg' 일 때만 합산(단위 불명은 수량 매칭 제외 → 1개 담기).
+    // 필요 총량: 무게(g)·부피(ml) 계열만 합산.
+    //  - g/kg → g, ml/l → ml, 컵 → ml(계량컵 200ml)
+    //  - 큰술/작은술/개 등은 수량 매칭 제외 → 1개 담기(최소).
     const unit = String(item.unit ?? "").toLowerCase().trim();
-    const isGramUnit = unit === "g" || unit === "kg" || unit === "그램" || unit === "킬로";
-    if (typeof item.amount === "number" && Number.isFinite(item.amount) && isGramUnit) {
-      current.totalG += Math.round(item.amount * (unit === "kg" || unit === "킬로" ? 1000 : 1));
+    const a = item.amount;
+    if (typeof a === "number" && Number.isFinite(a)) {
+      if (unit === "g" || unit === "그램") current.totalG += Math.round(a);
+      else if (unit === "kg" || unit === "킬로") current.totalG += Math.round(a * 1000);
+      else if (unit === "ml") current.totalMl += Math.round(a);
+      else if (unit === "l" || unit === "리터") current.totalMl += Math.round(a * 1000);
+      else if (unit === "컵") current.totalMl += Math.round(a * 200);
     }
     for (const recipe of item.needed_by ?? []) current.neededBy.add(recipe);
     grouped.set(name, current);
   }
 
-  return Array.from(grouped, ([name, value]) => ({
-    name,
-    quantity: value.quantities.join(" + "),
-    priceKrw: 0,
-    neededG: value.totalG > 0 ? value.totalG : undefined,
-    reason:
-      value.neededBy.size > 0
-        ? `필요 식단: ${Array.from(value.neededBy).join(", ")}`
-        : "식단에 필요한 부족 재료",
-  }));
+  return Array.from(grouped, ([name, value]) => {
+    // 한 재료에 무게·부피가 섞이면 무게(g)를 우선.
+    let neededAmount: number | undefined =
+      value.totalG > 0 ? value.totalG : value.totalMl > 0 ? value.totalMl : undefined;
+    let neededUnit: "g" | "ml" | "개" | undefined =
+      value.totalG > 0 ? "g" : value.totalMl > 0 ? "ml" : undefined;
+    // 과일류: 무게가 잡히면 개수로 환산(일괄 200g/개, 200g 미만이면 1개).
+    //  g로 검색하면 사과칩·말랭이 등 가공품이 떠서, 개 단위는 이름만으로 검색하게 한다.
+    if (FRUITS.has(name) && value.totalG > 0) {
+      neededAmount = Math.max(1, Math.ceil(value.totalG / 200));
+      neededUnit = "개";
+    }
+    return {
+      name,
+      quantity: value.quantities.join(" + "),
+      priceKrw: 0,
+      neededAmount,
+      neededUnit,
+      reason:
+        value.neededBy.size > 0
+          ? `필요 식단: ${Array.from(value.neededBy).join(", ")}`
+          : "식단에 필요한 부족 재료",
+    };
+  });
 }
 
 export function mapChatToRunResponse(

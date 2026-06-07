@@ -104,16 +104,14 @@ export function ConditionBar({ value, onChange }: Props) {
 
       <Field label="배송 선호">
         <select
-          value={value.deliveryPreference ?? "freshness"}
+          value={value.deliveryPreference ?? "speed"}
           onChange={(e) =>
             patch({ deliveryPreference: e.target.value as DeliveryPreference })
           }
           className={cls}
         >
-          <option value="freshness">신선도 우선</option>
           <option value="speed">빠른 배송</option>
           <option value="price">가격</option>
-          <option value="nutrition">영양 조건</option>
         </select>
       </Field>
     </section>

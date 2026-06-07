@@ -379,8 +379,8 @@ function extractSearchCandidatesInPage(limit) {
     const value = Number(digits);
     return Number.isFinite(value) && value > 0 ? value : null;
   };
-  // 상품명에서 용량(그램 가정) 추정: 숫자+단위 × 멀티팩. 못 구하면 null.
-  // (단순화: 모든 단위를 g로 본다. kg/l/리터/킬로만 ×1000.)
+  // 상품명에서 용량 추정: 숫자+단위 × 멀티팩. 못 구하면 null.
+  // 무게(g)·부피(ml)를 기본단위로 반환(kg/l/리터/킬로만 ×1000). 검색 단위와 같은 계열끼리 비교.
   const parseAmountG = (text) => {
     const s = String(text || "");
     // 용량(첫 번째 숫자+단위). "(10g당 …)" 단가 표기는 뒤에 오므로 보통 영향 없음.
@@ -480,19 +480,25 @@ function extractSearchCandidatesInPage(limit) {
       ]),
     );
     if (!price) {
-      const pm = allText.match(/([\d,]{2,})\s*원/);
-      price = pm ? parsePrice(pm[1]) : null;
+      // 셀렉터가 안 잡힐 때: 정가(취소선 del)·단위가("…당 …원")·적립("…원 적립")을 제외하고
+      // 남는 첫 '…원'을 판매가로 본다. (할인 상품은 정가가 먼저 나와 정가로 오인되기 쉬움)
+      const delNum = (
+        (root.querySelector("del")?.innerText || "").match(/[\d,]{2,}/) || []
+      )[0];
+      const cleaned = allText
+        .replace(/\S*당\s*[\d,]{2,}\s*원/g, " ") // "10ml당 489원" 등 단위가 제거
+        .replace(/[\d,]{2,}\s*원?\s*적립/g, " "); // "최대 68원 적립" 제거
+      const sale = (cleaned.match(/[\d,]{2,}\s*원/g) || [])
+        .map((s) => (s.match(/[\d,]{2,}/) || [])[0])
+        .find((n) => n && n !== delNum);
+      price = sale ? parsePrice(sale) : null;
     }
     const isAd = /광고|AD\b/i.test(allText);
     // 로켓 배지는 텍스트가 아니라 이미지/아이콘인 경우가 많아 img(alt/src)·class 도 확인.
     const rocketEl = root.querySelector(
       "img[alt*='로켓'], img[src*='rocket' i], [class*='rocket' i]",
     );
-    const freshEl = root.querySelector(
-      "img[alt*='프레시'], img[src*='fresh' i], [class*='fresh' i]",
-    );
     const isRocket = /로켓/.test(allText) || !!rocketEl;
-    const isRocketFresh = /로켓\s*프레시/.test(allText) || !!freshEl;
     const delivery = firstText(root, [
       ".arrival-info",
       ".delivery",
@@ -508,7 +514,6 @@ function extractSearchCandidatesInPage(limit) {
       url, // 상품 경로와 itemId/vendorItemId만 유지해 선택 옵션으로 바로 이동.
       isAd,
       isRocket,
-      isRocketFresh,
       // 용량은 카드 전체 텍스트에서 파싱(상품명 앵커가 제목만일 때도 "150g, 1개" 등 확보).
       amountG: parseAmountG(allText) ?? parseAmountG(name),
       delivery,
@@ -530,15 +535,16 @@ function normalizeSearchText(value) {
 }
 
 // 선호(preference)에 따른 단일 최우선 정렬(가중치 혼합 아님).
-//  - price/nutrition/기본 → 최저가
+//  - price/기본 → 최저가
 //  - speed → 로켓 상품 먼저, 그 안에서 최저가
-//  - freshness → 로켓프레시 먼저, 그다음 로켓, 그 안에서 최저가
 // 단, 항상 (1) 재료명 관련성, (2) 광고 여부를 앞 기준으로 둔다(엉뚱/광고 상품 방지).
 function rankSearchCandidates(ingredient, candidates, preference) {
   const needle = normalizeSearchText(ingredient);
   const SEARCH_ALIASES = {
     계란: ["달걀", "대란", "특란", "왕란", "중란"],
     달걀: ["계란", "대란", "특란", "왕란", "중란"],
+    쇠고기: ["소고기"],
+    소고기: ["쇠고기"],
   };
   const searchTerms = Array.from(
     new Set([needle, ...(SEARCH_ALIASES[needle] || [])].filter(Boolean)),
@@ -556,8 +562,18 @@ function rankSearchCandidates(ingredient, candidates, preference) {
     "차", "청", "즙", "환", "진액", "엑기스", "농축", "정과", "절임", "장아찌",
     "캔디", "사탕", "시럽", "페이스트", "티백", "음료", "스틱", "식초", "분말", "가루",
     "김치", "양념", "허브", "시즈닝", "레몬머틀", "와사비",
-    "트러플", "갈릭", "버터",
+    "트러플", "갈릭", "버터", "칩", "죽", // "죽"=즉석죽(쇠고기죽 등). 인접만 보므로 죽순·죽방멸치는 안전.
   ];
+  // 비식품 — 어떤 식재료에도 안 붙는 단어라 전역 제외.
+  const NONFOOD = [
+    "모형", "장난감", "모조", // 가짜/완구
+    "강아지", "고양이", "반려", "애견", "애묘", "댕댕이", "사료", // 펫푸드(사람 식품 아님)
+  ];
+  // 가공식품(식용이나 원물 아님) — "쇠고기크림스프"처럼 단어가 떨어져도 제외. 재료 자체가 그것이면 예외.
+  const PROCESSED_GLOBAL = ["스프", "수프", "다시다", "조미료", "고추장"];
+  // 재배용 씨앗(비식품) 키워드 — 인접조건 없이 전역 검사(아래 isProcessed).
+  //  단 재료 자체가 씨앗류면(치아씨·바질씨앗 등) 제외하지 않는다.
+  const isSeedIngredient = /씨|종자|모종/.test(needle);
   const EGG_PROCESSED = [
     "구운계란", "구운달걀", "훈제계란", "훈제달걀", "훈제란",
     "반숙란", "반숙계란", "반숙달걀", "계란과자", "달걀과자",
@@ -567,6 +583,18 @@ function rankSearchCandidates(ingredient, candidates, preference) {
       (needle === "계란" || needle === "달걀") &&
       EGG_PROCESSED.some((word) => hay.includes(word))
     ) {
+      return true;
+    }
+    // 비식품(모형/장난감/모조/펫푸드): "홍피망 모형"처럼 비식품 제외.
+    if (NONFOOD.some((w) => hay.includes(w))) {
+      return true;
+    }
+    // 가공식품(스프 등): "쇠고기크림스프"처럼 단어가 떨어져 있어도 제외.
+    if (PROCESSED_GLOBAL.some((w) => !needle.includes(w) && hay.includes(w))) {
+      return true;
+    }
+    // 재배용 비식품(종자/씨앗/모종/파종): "시금치 참씨앗"처럼 단어가 떨어져 있어도 제외.
+    if (!isSeedIngredient && /종자|씨앗|모종|파종/.test(hay)) {
       return true;
     }
     return searchTerms.some((term) =>
@@ -614,9 +642,6 @@ function rankSearchCandidates(ingredient, candidates, preference) {
   if (preference === "speed") {
     const rocket = list.filter((c) => c.isRocket);
     if (rocket.length) list = rocket; // 로켓 없으면 폴백
-  } else if (preference === "freshness") {
-    const fresh = list.filter((c) => c.isRocketFresh);
-    if (fresh.length) list = fresh;
   }
   // 관련성 높은 순 → 쿠팡 원래 순서(낮은 가격순) 유지(stable sort).
   return list.sort((a, b) => b.score - a.score || a._i - b._i);
@@ -674,91 +699,121 @@ async function extractCandidatesWithRetry(tabId) {
 
 async function searchOneIngredient(item, reusableTabId) {
   const ingredient = item.ingredient;
-  const neededG = Number(item.neededG) || null;
-  // 필요 g 가 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
-  const query = neededG ? `${ingredient} ${neededG}g` : ingredient;
-  // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송/신선도면) 로켓 필터.
-  const params = new URLSearchParams({
-    q: query,
-    channel: "user",
-    listSize: "36",
-    sorter: "salePriceAsc",
-  });
-  if (item.preference === "speed" || item.preference === "freshness") {
-    params.set("filterType", "rocket_luxury,rocket_wow,coupang_global");
-    params.set("rocketAll", "true");
-  }
-  const searchUrl = `https://www.coupang.com/np/search?${params.toString()}`;
+  const neededAmount = Number(item.neededAmount) || null;
+  const neededUnit = item.neededUnit; // "g" | "ml" | "개"
+  // 무게/부피(g·ml)만 검색어에 용량을 붙인다. 과일(개)은 그램을 붙이면 칩/말랭이가 떠서 이름만 검색.
+  const measured = !!neededAmount && (neededUnit === "g" || neededUnit === "ml");
+  const query = measured ? `${ingredient} ${neededAmount}${neededUnit}` : ingredient;
+  // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송면) 로켓 필터.
+  const buildUrl = (useRocket) => {
+    const params = new URLSearchParams({
+      q: query,
+      channel: "user",
+      listSize: "36",
+      sorter: "salePriceAsc",
+    });
+    if (useRocket) {
+      params.set("filterType", "rocket_luxury,rocket_wow,coupang_global");
+      params.set("rocketAll", "true");
+    }
+    return `https://www.coupang.com/np/search?${params.toString()}`;
+  };
+  const wantRocket = item.preference === "speed";
+
   let tabId = reusableTabId;
   let lastError = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      tabId = await openOrReuseSearchTab(tabId, searchUrl);
-      await waitForTabComplete(tabId);
-      const result = await extractCandidatesWithRetry(tabId);
-      const candidates = rankSearchCandidates(
-        ingredient,
-        result?.candidates || [],
-        item.preference,
-      );
-      const selected = candidates[0] || null;
-
-      let addMode = "direct";
-      let quantity = 1;
-      let qtyNote = "";
-      if (selected && neededG && selected.amountG) {
-        if (selected.amountG >= neededG) {
-          qtyNote = ` (필요 ${neededG}g ≤ 상품 ${selected.amountG}g → 1개)`;
-        } else {
-          addMode = "adjust";
-          quantity = Math.max(1, Math.ceil(neededG / selected.amountG));
-          qtyNote = ` (필요 ${neededG}g / 상품 ${selected.amountG}g → ${quantity}개)`;
-        }
-      } else if (selected && neededG && !selected.amountG) {
-        qtyNote = " (상품 용량 미확인 → 1개)";
-      }
-
-      return {
-        tabId,
-        result: {
+  // 한 URL을 열어 후보를 추출·랭킹한다(탭이 죽으면 1회 재시도).
+  const runSearch = async (searchUrl) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        tabId = await openOrReuseSearchTab(tabId, searchUrl);
+        await waitForTabComplete(tabId);
+        const result = await extractCandidatesWithRetry(tabId);
+        const candidates = rankSearchCandidates(
           ingredient,
-          status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
-          searchUrl,
-          selected,
-          candidates,
-          addMode,
-          quantity,
-          message: selected
-            ? `상품을 선택했습니다.${qtyNote}`
-            : result?.blocked
-              ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
-              : `상품 링크 ${result?.productLinkCount || 0}개를 확인했지만 안전하게 확정할 관련 상품이 없습니다.`,
-        },
-      };
-    } catch (e) {
-      lastError = e;
-      const message = String(e?.message || e);
-      if (!/No tab with id|Tabs cannot be edited right now/i.test(message) || attempt > 0) {
-        break;
+          result?.candidates || [],
+          item.preference,
+        );
+        return { result, candidates };
+      } catch (e) {
+        lastError = e;
+        const message = String(e?.message || e);
+        if (!/No tab with id|Tabs cannot be edited right now/i.test(message) || attempt > 0) {
+          throw e;
+        }
+        tabId = null;
+        await delay(1000);
       }
-      tabId = null;
-      await delay(1000);
     }
-  }
-
-  return {
-    tabId,
-    result: {
-      ingredient,
-      status: "failed",
-      searchUrl,
-      selected: null,
-      candidates: [],
-      message: "상품 검색에 실패했습니다: " +
-        (lastError && lastError.message ? lastError.message : lastError),
-    },
+    throw lastError;
   };
+
+  let searchUrl = buildUrl(wantRocket);
+  try {
+    let { result, candidates } = await runSearch(searchUrl);
+    // 로켓 폴백: 빠른배송인데 로켓 결과에 관련 상품이 없으면(정육·생선 등 로켓 미지원),
+    //  로켓 필터를 빼고 한 번 더 검색해 일반배송 원물이라도 잡는다.
+    let rocketFallback = false;
+    if (wantRocket && !result?.blocked && candidates.length === 0) {
+      await delay(1000);
+      searchUrl = buildUrl(false);
+      ({ result, candidates } = await runSearch(searchUrl));
+      rocketFallback = true;
+    }
+
+    const selected = candidates[0] || null;
+    let addMode = "direct";
+    let quantity = 1;
+    let qtyNote = "";
+    if (measured && selected && selected.amountG) {
+      if (selected.amountG >= neededAmount) {
+        qtyNote = ` (필요 ${neededAmount}${neededUnit} ≤ 상품 ${selected.amountG}${neededUnit} → 1개)`;
+      } else {
+        addMode = "adjust";
+        quantity = Math.max(1, Math.ceil(neededAmount / selected.amountG));
+        qtyNote = ` (필요 ${neededAmount}${neededUnit} / 상품 ${selected.amountG}${neededUnit} → ${quantity}개)`;
+      }
+    } else if (selected && neededUnit === "개" && neededAmount) {
+      // 과일: 보통 팩/kg 단위 판매라 N팩 담으면 과다 → 1개(1팩)만 담고 필요 개수만 안내.
+      qtyNote = ` (과일 약 ${neededAmount}개 분량 → 1개 담기)`;
+    } else if (measured && selected && !selected.amountG) {
+      qtyNote = " (상품 용량 미확인 → 1개)";
+    }
+    const deliveryNote = rocketFallback ? " (로켓 없음 → 일반배송 포함)" : "";
+
+    return {
+      tabId,
+      result: {
+        ingredient,
+        status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
+        searchUrl,
+        selected,
+        candidates,
+        addMode,
+        quantity,
+        message: selected
+          ? `상품을 선택했습니다.${deliveryNote}${qtyNote}`
+          : result?.blocked
+            ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
+            : `상품 링크 ${result?.productLinkCount || 0}개를 확인했지만 안전하게 확정할 관련 상품이 없습니다.`,
+      },
+    };
+  } catch (e) {
+    lastError = e;
+    return {
+      tabId,
+      result: {
+        ingredient,
+        status: "failed",
+        searchUrl,
+        selected: null,
+        candidates: [],
+        message: "상품 검색에 실패했습니다: " +
+          (lastError && lastError.message ? lastError.message : lastError),
+      },
+    };
+  }
 }
 
 async function searchProducts(items, senderTabId, reqId) {

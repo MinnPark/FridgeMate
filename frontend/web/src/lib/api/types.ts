@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 export type FridgeMateMode = "today" | "weekend" | "meal_prep" | "goal";
 
-export type DeliveryPreference = "speed" | "freshness" | "price" | "nutrition";
+export type DeliveryPreference = "speed" | "price";
 
 export interface FridgeMateRequest {
   ingredients: string; // 쉼표 구분 텍스트 (예: "닭가슴살, 계란, 브로콜리, 두부")
@@ -161,7 +161,8 @@ export interface ShoppingItem {
   alternativeFor?: string; // 어떤 재료의 대체재인지
   productUrl?: string; // 쿠팡 상품 URL (자동 담기 대상, 없으면 skipped) — mock/API 제공
   score?: ScoreInfo; // 상품 점수 (mock/백엔드 제공)
-  neededG?: number; // 필요 총량(그램 가정). 검색 상품 용량과 비교해 담을 개수 산정용.
+  neededAmount?: number; // 필요 총량(neededUnit 기준). 검색 상품 용량과 비교해 담을 개수 산정용.
+  neededUnit?: "g" | "ml" | "개"; // 단위 계열(무게 g / 부피 ml / 과일 개).
 }
 
 export interface ShoppingList {
@@ -252,7 +253,6 @@ export interface CoupangSearchCandidate {
   url: string;
   isAd: boolean;
   isRocket: boolean;
-  isRocketFresh?: boolean; // 로켓프레시(신선도 프록시)
   delivery?: string;
   amountG?: number | null; // 상품명에서 파싱한 용량(그램 가정). 못 구하면 null.
   score: number;

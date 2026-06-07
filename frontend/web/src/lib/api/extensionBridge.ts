@@ -91,8 +91,9 @@ export function searchProductsViaExtension(
   items: Array<{
     ingredient: string;
     quantityText?: string;
-    neededG?: number; // 필요 총량(그램 가정)
-    preference?: "speed" | "freshness" | "price" | "nutrition"; // 정렬 최우선 기준
+    neededAmount?: number; // 필요 총량(neededUnit 기준)
+    neededUnit?: "g" | "ml" | "개"; // 단위 계열(무게 g / 부피 ml / 과일 개)
+    preference?: "speed" | "price"; // 정렬 최우선 기준
   }>,
   onProgress?: (p: SearchProgress) => void,
 ): Promise<CoupangProductSearchResult[]> {
