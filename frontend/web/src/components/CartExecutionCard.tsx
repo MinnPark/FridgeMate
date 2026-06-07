@@ -8,6 +8,7 @@ import {
   openCoupangCartPage,
   openCoupangSearch,
 } from "@/lib/api/coupang";
+import { rankProductCandidates } from "@/lib/api/client";
 import {
   executeViaExtension,
   onExtensionReady,
@@ -19,6 +20,7 @@ import {
 import type {
   CartExecuteItem,
   CartExecuteResponse,
+  CoupangSearchCandidate,
   CoupangProductSearchResult,
   DeliveryPreference,
   ShoppingList,
@@ -62,6 +64,7 @@ export function CartExecutionCard({
   const [resultOpen, setResultOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [searchResults, setSearchResults] = useState<CoupangProductSearchResult[]>([]);
+  const [candidatePicker, setCandidatePicker] = useState<string | null>(null);
   // 구매할 재료 선택(체크박스). 기본 전체 해제(사용자가 직접 선택).
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
 
@@ -151,6 +154,60 @@ export function CartExecutionCard({
     });
   }
 
+  function withSelectedCandidate(
+    result: CoupangProductSearchResult,
+    candidate: CoupangSearchCandidate,
+    rank?: {
+      confidence?: number;
+      reason?: string;
+      provider?: string;
+      usedLlm?: boolean;
+    },
+  ): CoupangProductSearchResult {
+    const item = shopping.items.find((shoppingItem) => shoppingItem.name === result.ingredient);
+    const measured =
+      item?.neededAmount &&
+      (item.neededUnit === "g" || item.neededUnit === "ml");
+    const quantity =
+      measured && candidate.amountG
+        ? Math.max(1, Math.ceil(item!.neededAmount! / candidate.amountG))
+        : 1;
+    return {
+      ...result,
+      status: "success",
+      selected: candidate,
+      addMode: quantity > 1 ? "adjust" : "direct",
+      quantity,
+      rankConfidence: rank?.confidence,
+      rankReason: rank?.reason,
+      rankProvider: rank?.provider,
+      usedLlm: rank?.usedLlm,
+      requiresReview: false,
+      message: rank?.reason
+        ? `상품을 확정했습니다. ${rank.reason}`
+        : "사용자가 후보 상품을 직접 선택했습니다.",
+    };
+  }
+
+  function selectCandidate(
+    ingredient: string,
+    candidate: CoupangSearchCandidate,
+  ) {
+    setSearchResults((prev) =>
+      prev.map((result) =>
+        result.ingredient === ingredient
+          ? withSelectedCandidate(result, candidate, {
+              confidence: 1,
+              reason: "사용자가 후보 목록에서 직접 선택했습니다.",
+              provider: "user",
+              usedLlm: false,
+            })
+          : result,
+      ),
+    );
+    setCandidatePicker(null);
+  }
+
   const step3State: StepState =
     phase === "running" ? "running" : phase === "result" ? "done" : "pending";
   const step2State: StepState =
@@ -201,9 +258,73 @@ export function CartExecutionCard({
           });
         },
       );
-      setSearchResults(results);
+      const rankedResults: CoupangProductSearchResult[] = [];
+      for (const result of results) {
+        if (result.candidates.length === 0) {
+          rankedResults.push({
+            ...result,
+            selected: null,
+            requiresReview: true,
+          });
+          continue;
+        }
+        const item = shopping.items.find(
+          (shoppingItem) => shoppingItem.name === result.ingredient,
+        );
+        try {
+          const ranked = await rankProductCandidates({
+            ingredient: result.ingredient,
+            neededAmount: item?.neededAmount,
+            neededUnit: item?.neededUnit,
+            preference: deliveryPreference,
+            recipeContexts: item?.recipeContexts,
+            candidates: result.candidates,
+          });
+          const candidate =
+            ranked.selected_id === null
+              ? null
+              : result.candidates[ranked.selected_id] ?? null;
+          if (ranked.auto_select && candidate) {
+            rankedResults.push(
+              withSelectedCandidate(result, candidate, {
+                confidence: ranked.confidence,
+                reason: ranked.reason,
+                provider: ranked.provider,
+                usedLlm: ranked.used_llm,
+              }),
+            );
+          } else {
+            rankedResults.push({
+              ...result,
+              selected: null,
+              rankConfidence: ranked.confidence,
+              rankReason: ranked.reason,
+              rankProvider: ranked.provider,
+              usedLlm: ranked.used_llm,
+              requiresReview: true,
+              message: ranked.used_llm
+                ? `LLM 신뢰도 ${Math.round(ranked.confidence * 100)}%로 사용자 선택이 필요합니다.`
+                : "키워드 규칙으로도 적합한 후보를 확정하지 못했습니다. 후보를 직접 선택해 주세요.",
+            });
+          }
+        } catch {
+          rankedResults.push({
+            ...result,
+            selected: null,
+            requiresReview: true,
+            usedLlm: false,
+            message: "상품 의미 판정 API에 연결하지 못했습니다. 후보를 직접 선택해 주세요.",
+          });
+        }
+      }
+      setSearchResults(rankedResults);
       setPhase("ready");
-      if (results.some((result) => result.selected)) setConfirmOpen(true);
+      if (
+        rankedResults.length === missing.length &&
+        rankedResults.every((result) => result.selected)
+      ) {
+        setConfirmOpen(true);
+      }
     } catch (e) {
       setExecError(e instanceof Error ? e.message : "쿠팡 상품 검색에 실패했습니다.");
       setPhase("result");
@@ -441,22 +562,70 @@ export function CartExecutionCard({
               {searchResults.map((result) => (
                 <li
                   key={result.ingredient}
-                  className="flex items-start gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 text-xs"
+                  className="rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 text-xs"
                 >
-                  <span className="min-w-14 font-semibold text-white/75">
-                    {result.ingredient}
-                  </span>
-                  {result.selected ? (
-                    <>
+                  <div className="flex items-start gap-2">
+                    <span className="min-w-14 font-semibold text-white/75">
+                      {result.ingredient}
+                    </span>
+                    {result.selected ? (
+                      <>
+                        <span className="min-w-0 flex-1 truncate text-white/60">
+                          {result.selected.name}
+                        </span>
+                        <span className="shrink-0 text-lime-accent">
+                          {formatKRW(result.selected.price)}
+                        </span>
+                      </>
+                    ) : (
                       <span className="min-w-0 flex-1 truncate text-white/60">
-                        {result.selected.name}
+                        {result.message}
                       </span>
-                      <span className="shrink-0 text-lime-accent">
-                        {formatKRW(result.selected.price)}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-amber-300">{result.message}</span>
+                    )}
+                    {result.candidates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCandidatePicker((current) =>
+                            current === result.ingredient ? null : result.ingredient,
+                          )
+                        }
+                        className="shrink-0 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-white/65 hover:bg-white/10"
+                      >
+                        {candidatePicker === result.ingredient ? "닫기" : "후보 선택"}
+                      </button>
+                    )}
+                  </div>
+                  {result.rankReason && (
+                    <p className="mt-1 pl-16 text-[10px] text-white/40">
+                      {result.rankProvider === "user"
+                        ? "사용자 선택"
+                        : result.usedLlm
+                          ? "LLM 판정"
+                          : "규칙 판정"}{" "}
+                      ·{" "}
+                      {Math.round((result.rankConfidence ?? 0) * 100)}% ·{" "}
+                      {result.rankReason}
+                    </p>
+                  )}
+                  {candidatePicker === result.ingredient && (
+                    <div className="mt-2 space-y-1 border-t border-white/5 pt-2">
+                      {result.candidates.slice(0, 5).map((candidate) => (
+                        <button
+                          key={candidate.url}
+                          type="button"
+                          onClick={() => selectCandidate(result.ingredient, candidate)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-white/[0.07]"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-white/65">
+                            {candidate.name}
+                          </span>
+                          <span className="shrink-0 text-white/45">
+                            {formatKRW(candidate.price)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </li>
               ))}
@@ -487,8 +656,14 @@ export function CartExecutionCard({
           <button
             onClick={() => {
               if (phase === "running" || phase === "searching") return;
-              if (phase === "ready" || allPickedResolved) {
+              if (allPickedResolved) {
                 setConfirmOpen(true);
+              } else if (phase === "ready") {
+                const unresolved = pickedItems.find(
+                  (item) =>
+                    !item.productUrl && !selectedByIngredient.has(item.name),
+                );
+                if (unresolved) setCandidatePicker(unresolved.name);
               } else {
                 void runSearch();
               }
@@ -505,8 +680,10 @@ export function CartExecutionCard({
               ? "상품 검색 중…"
               : phase === "running"
               ? "담는 중…"
-              : phase === "ready" || allPickedResolved
+              : allPickedResolved
                 ? `선택 ${pickedItems.length}개 장바구니 담기`
+                : phase === "ready"
+                  ? `자동 확정되지 않은 상품 선택 (${pickedItems.length - targetCount}개)`
                 : phase === "result"
                 ? "🤖 다시 담기 (Chrome 확장)"
                 : `선택 ${pickedItems.length}개 쿠팡 상품 검색`}
@@ -536,8 +713,8 @@ export function CartExecutionCard({
 
       {/* 안내 문구 */}
       <p className="mt-3 text-[11px] text-white/40">
-        Chrome 확장 프로그램이 쿠팡 검색 결과에서 상품 후보를 수집하고 자동 선택합니다.
-        선택 결과를 확인한 뒤에만 장바구니 담기가 실행되며, 결제는 진행되지 않습니다.
+        Chrome 확장 프로그램이 상품 후보를 수집하고, 백엔드 LLM이 의미 적합도를
+        판정합니다. 신뢰도가 낮으면 사용자가 후보를 직접 선택하며 결제는 진행되지 않습니다.
       </p>
       {!extReady && (
         <p className="mt-1.5 rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/55">

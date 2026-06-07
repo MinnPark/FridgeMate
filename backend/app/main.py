@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.graph.orchestrator import build_graph
+from app.tools.product_rank_tools import rank_product_candidates
 
 
 app = FastAPI(title="FridgeMate AI")
@@ -33,6 +34,26 @@ class ChatRequest(BaseModel):
     calorie_target_kcal:  int | None = Field(default=None, examples=[1700])
     carbs_target_gram:    int | None = Field(default=None, examples=[150])
     fat_target_gram:      int | None = Field(default=None, examples=[55])
+
+
+class ProductCandidate(BaseModel):
+    name: str
+    price: int
+    url: str
+    isAd: bool = False
+    isRocket: bool = False
+    delivery: str | None = None
+    amountG: float | None = None
+    score: float = 0
+
+
+class ProductRankRequest(BaseModel):
+    ingredient: str
+    needed_amount: float | None = None
+    needed_unit: str | None = None
+    preference: str | None = None
+    recipe_contexts: list[str] = Field(default_factory=list)
+    candidates: list[ProductCandidate]
 
 
 @app.get("/health")
@@ -67,3 +88,15 @@ def chat(req: ChatRequest):
         }
     )
     return result
+
+
+@app.post("/shopping/rank-products")
+def rank_products(req: ProductRankRequest):
+    return rank_product_candidates(
+        ingredient=req.ingredient,
+        needed_amount=req.needed_amount,
+        needed_unit=req.needed_unit,
+        preference=req.preference,
+        recipe_contexts=req.recipe_contexts,
+        candidates=[candidate.model_dump() for candidate in req.candidates],
+    )

@@ -88,24 +88,61 @@ def _call_openai_json(
         ],
     }
     base = os.getenv("FRIDGEMATE_LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    req = urllib.request.Request(
-        f"{base}/chat/completions",  # OpenRouter 등 OpenAI 호환 엔드포인트 지원
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    endpoint = f"{base}/chat/completions"
+
+    def request(current_payload: dict[str, Any]) -> dict[str, Any]:
+        req = urllib.request.Request(
+            endpoint,  # OpenRouter, LM Studio 등 OpenAI 호환 엔드포인트 지원
+            data=json.dumps(current_payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                return json.loads(res.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"LLM HTTP {exc.code}: {body}") from exc
+
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            raw = json.loads(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM HTTP {exc.code}: {body}") from exc
+        raw = request(payload)
+    except RuntimeError as exc:
+        # LM Studio 일부 버전은 json_object 대신 text/json_schema만 허용한다.
+        if "response_format.type" not in str(exc):
+            raise
+        payload["response_format"] = {"type": "text"}
+        payload["messages"][-1]["content"] += "\n반드시 JSON object만 출력하세요."
+        raw = request(payload)
 
     content = raw["choices"][0]["message"]["content"]
-    return json.loads(content)
+    return _parse_json_object(content)
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        parsed = json.loads(text[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM response must be a JSON object")
+    return parsed
 
 
 def _call_anthropic_json(

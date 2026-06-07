@@ -274,6 +274,7 @@ function mapMissingToShoppingItems(
       priceKrw: 0,
       neededAmount,
       neededUnit,
+      recipeContexts: Array.from(value.neededBy),
       reason:
         value.neededBy.size > 0
           ? `필요 식단: ${Array.from(value.neededBy).join(", ")}`

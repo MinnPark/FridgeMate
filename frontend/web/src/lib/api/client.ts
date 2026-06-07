@@ -20,7 +20,10 @@ import { buildCartResponse, buildRunResponse } from "./mock";
 import type {
   CartRequest,
   CartResponse,
+  CoupangSearchCandidate,
+  DeliveryPreference,
   FridgeMateRequest,
+  ProductRankResponse,
   RunResponse,
 } from "./types";
 
@@ -144,4 +147,22 @@ export async function checkHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function rankProductCandidates(input: {
+  ingredient: string;
+  neededAmount?: number;
+  neededUnit?: "g" | "ml" | "개";
+  preference?: DeliveryPreference;
+  recipeContexts?: string[];
+  candidates: CoupangSearchCandidate[];
+}): Promise<ProductRankResponse> {
+  return postJson<ProductRankResponse>("/shopping/rank-products", {
+    ingredient: input.ingredient,
+    needed_amount: input.neededAmount ?? null,
+    needed_unit: input.neededUnit ?? null,
+    preference: input.preference ?? "price",
+    recipe_contexts: input.recipeContexts ?? [],
+    candidates: input.candidates.slice(0, 5),
+  });
 }
