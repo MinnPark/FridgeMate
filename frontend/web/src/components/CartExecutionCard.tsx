@@ -11,11 +11,14 @@ import {
   executeViaExtension,
   onExtensionReady,
   pingExtension,
+  searchProductsViaExtension,
   type ExecProgress,
+  type SearchProgress,
 } from "@/lib/api/extensionBridge";
 import type {
   CartExecuteItem,
   CartExecuteResponse,
+  CoupangProductSearchResult,
   ShoppingList,
 } from "@/lib/api/types";
 import { MOCK_CART_LINKS } from "@/lib/api/coupangMockLinks";
@@ -25,7 +28,7 @@ import { Modal } from "./Modal";
 const IS_DEV = process.env.NODE_ENV !== "production";
 
 type StepState = "done" | "running" | "pending";
-type Phase = "idle" | "running" | "result";
+type Phase = "idle" | "searching" | "ready" | "running" | "result";
 
 interface Props {
   shopping: ShoppingList;
@@ -49,6 +52,7 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [searchResults, setSearchResults] = useState<CoupangProductSearchResult[]>([]);
 
   useEffect(() => {
     const off = onExtensionReady(() => setExtReady(true));
@@ -62,19 +66,77 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
 
   const hasItems = shopping.items.length > 0;
   const searchUrl = shopping.coupangSearchUrl;
-  const targetCount = shopping.items.filter((i) => i.productUrl).length;
+  const selectedByIngredient = new Map(
+    searchResults
+      .filter((result) => result.selected)
+      .map((result) => [result.ingredient, result.selected!]),
+  );
+  const targetCount = shopping.items.filter(
+    (item) => item.productUrl || selectedByIngredient.has(item.name),
+  ).length;
 
   function buildExecItems(): CartExecuteItem[] {
-    return shopping.items.map((i) => ({
-      ingredient: i.name,
-      productUrl: i.productUrl,
-      searchUrl: i.productUrl ? undefined : searchUrl,
+    return shopping.items.map((item) => ({
+      ingredient: item.name,
+      productUrl: item.productUrl || selectedByIngredient.get(item.name)?.url,
+      searchUrl:
+        item.productUrl || selectedByIngredient.has(item.name) ? undefined : searchUrl,
       quantity: 1,
     }));
   }
 
   const step3State: StepState =
     phase === "running" ? "running" : phase === "result" ? "done" : "pending";
+  const step2State: StepState =
+    phase === "searching"
+      ? "running"
+      : targetCount > 0 || phase === "ready" || phase === "running" || phase === "result"
+        ? "done"
+        : "pending";
+
+  async function runSearch() {
+    if (!extReady) {
+      setExecError(
+        "FridgeMate Cart Helper 확장 프로그램이 감지되지 않았어요. 확장을 로드한 뒤 페이지를 새로고침해 주세요.",
+      );
+      setPhase("result");
+      return;
+    }
+    const missing = shopping.items.filter((item) => !item.productUrl);
+    if (missing.length === 0) {
+      setPhase("ready");
+      setConfirmOpen(true);
+      return;
+    }
+    setPhase("searching");
+    setExecError(null);
+    setProgress({ done: 0, total: missing.length });
+    try {
+      const results = await searchProductsViaExtension(
+        missing.map((item) => ({
+          ingredient: item.name,
+          quantityText: item.quantity,
+        })),
+        (p: SearchProgress) => {
+          setProgress((prev) => {
+            const base = prev ?? { done: 0, total: p.total };
+            if (p.phase === "search-start") {
+              return { ...base, total: p.total, current: p.itemName };
+            }
+            return { ...base, total: p.total, done: p.done ?? base.done };
+          });
+        },
+      );
+      setSearchResults(results);
+      setPhase("ready");
+      if (results.some((result) => result.selected)) setConfirmOpen(true);
+    } catch (e) {
+      setExecError(e instanceof Error ? e.message : "쿠팡 상품 검색에 실패했습니다.");
+      setPhase("result");
+    } finally {
+      setProgress(null);
+    }
+  }
 
   async function runItems(items: CartExecuteItem[]) {
     if (!extReady) {
@@ -213,9 +275,15 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
             <StepRow n={1} state="done" label="부족 재료 분석 완료" note="자동" />
             <StepRow
               n={2}
-              state={searchUrl ? "done" : "pending"}
-              label="쿠팡 검색 URL 생성 완료"
-              note="자동"
+              state={step2State}
+              label="쿠팡 상품 검색 및 선택"
+              note={
+                phase === "searching"
+                  ? `검색 중 ${progress?.done ?? 0}/${progress?.total ?? 0}`
+                  : targetCount > 0
+                    ? `${targetCount}개 선택`
+                    : "실행 전"
+              }
             />
             <StepRow
               n={3}
@@ -234,7 +302,7 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           </ol>
 
           {/* 진행률 바 */}
-          {phase === "running" && (
+          {(phase === "searching" || phase === "running") && (
             <div className="mt-2">
               <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                 <div
@@ -249,9 +317,38 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
                 />
               </div>
               <p className="mt-1 text-[11px] text-white/50">
-                {progress?.current ? `담는 중: ${progress.current}` : "처리 중…"}
+                {progress?.current
+                  ? `${phase === "searching" ? "검색 중" : "담는 중"}: ${progress.current}`
+                  : "처리 중…"}
               </p>
             </div>
+          )}
+
+          {searchResults.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {searchResults.map((result) => (
+                <li
+                  key={result.ingredient}
+                  className="flex items-start gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 text-xs"
+                >
+                  <span className="min-w-14 font-semibold text-white/75">
+                    {result.ingredient}
+                  </span>
+                  {result.selected ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-white/60">
+                        {result.selected.name}
+                      </span>
+                      <span className="shrink-0 text-lime-accent">
+                        {formatKRW(result.selected.price)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-amber-300">{result.message}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
 
           {/* 보조 액션 */}
@@ -267,15 +364,26 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
 
           {/* 메인 실행 버튼 */}
           <button
-            onClick={() => (phase === "running" ? undefined : setConfirmOpen(true))}
-            disabled={phase === "running" || !hasItems}
+            onClick={() => {
+              if (phase === "running" || phase === "searching") return;
+              if (phase === "ready" || targetCount === shopping.items.length) {
+                setConfirmOpen(true);
+              } else {
+                void runSearch();
+              }
+            }}
+            disabled={phase === "running" || phase === "searching" || !hasItems}
             className="mt-2 w-full rounded-xl bg-gold py-2.5 text-sm font-bold text-ink-900 transition hover:brightness-105 disabled:opacity-60"
           >
-            {phase === "running"
+            {phase === "searching"
+              ? "상품 검색 중…"
+              : phase === "running"
               ? "담는 중…"
-              : phase === "result"
+              : phase === "ready" || targetCount === shopping.items.length
+                ? "선택 상품 확인 및 장바구니 담기"
+                : phase === "result"
                 ? "🤖 다시 담기 (Chrome 확장)"
-                : "🤖 장바구니 담기 실행 (Chrome 확장)"}
+                : "쿠팡 상품 자동 검색"}
           </button>
 
           {phase === "result" && (exec || execError) && (
@@ -302,9 +410,8 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
 
       {/* 안내 문구 */}
       <p className="mt-3 text-[11px] text-white/40">
-        검색 URL 생성은 자동으로 완료됩니다. 장바구니 담기는 사용자 클릭이 필요하며,
-        Chrome 확장 프로그램으로 실행됩니다. 쿠팡 로그인은 사용자 브라우저에서 직접
-        진행하며, 결제는 자동으로 진행되지 않습니다.
+        Chrome 확장 프로그램이 쿠팡 검색 결과에서 상품 후보를 수집하고 자동 선택합니다.
+        선택 결과를 확인한 뒤에만 장바구니 담기가 실행되며, 결제는 진행되지 않습니다.
       </p>
       {!extReady && (
         <p className="mt-1.5 rounded-lg bg-white/5 px-3 py-2 text-[11px] text-white/55">
@@ -322,14 +429,24 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       >
         <ul className="space-y-1 text-sm text-white/80">
           <li>
-            담을 품목: <b>{shopping.items.length}개</b> (상품 URL 있는{" "}
+            담을 품목: <b>{shopping.items.length}개</b> (선택 완료{" "}
             <b>{targetCount}개</b> 담기 시도)
           </li>
           <li className="text-white/60">
             {shopping.items.map((i) => i.name).join(", ")}
           </li>
           <li>
-            예상 총액: <b>{formatKRW(shopping.estimatedCostKrw)}</b>
+            검색 상품 총액:{" "}
+            <b>
+              {formatKRW(
+                shopping.items.reduce(
+                  (sum, item) =>
+                    sum +
+                    (selectedByIngredient.get(item.name)?.price ?? item.priceKrw),
+                  0,
+                ),
+              )}
+            </b>
           </li>
         </ul>
         <ul className="mt-2 space-y-0.5 text-xs text-white/55">

@@ -12,6 +12,8 @@ const CLICK_GAP_MS = 350;
 const SETTLE_MS = 1000; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
 const QTY_SETTLE_MS = 1500; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전). 1000은 짧아 1개로 담기는 사례 → 1500.
 const CONCURRENCY = 5; // 동시에 처리할 상품 탭 수(속도↑). 너무 크면 쿠팡 봇 의심/리소스 부담.
+const SEARCH_CONCURRENCY = 2;
+const SEARCH_RESULT_LIMIT = 5;
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
 // 페이지 컨텍스트에서 실행: 장바구니 담기 버튼만 찾아 클릭.
@@ -124,6 +126,184 @@ function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// 페이지 컨텍스트에서 실행: 쿠팡 검색 결과 카드에서 상품 정보를 추출한다.
+// 쿠팡 DOM 변경에 대비해 data-product-id와 상품 링크를 함께 사용한다.
+function extractSearchCandidatesInPage(limit) {
+  const absoluteUrl = (href) => {
+    try {
+      return new URL(href, location.origin).toString();
+    } catch (e) {
+      return "";
+    }
+  };
+  const parsePrice = (text) => {
+    const digits = String(text || "").replace(/[^\d]/g, "");
+    const value = Number(digits);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const firstText = (root, selectors) => {
+    for (const selector of selectors) {
+      const el = root.querySelector(selector);
+      const text = (el && (el.innerText || el.textContent) || "").trim();
+      if (text) return text;
+    }
+    return "";
+  };
+
+  const roots = Array.from(
+    document.querySelectorAll(
+      "li[data-product-id], [data-product-id].search-product, li.search-product",
+    ),
+  );
+  const seen = new Set();
+  const candidates = [];
+  for (const root of roots) {
+    const link = root.querySelector('a[href*="/vp/products/"]');
+    const url = absoluteUrl(link && link.getAttribute("href"));
+    if (!url || seen.has(url)) continue;
+
+    const name = firstText(root, [
+      ".name",
+      ".search-product-name",
+      "[class*='ProductUnit_productName']",
+      "a[href*='/vp/products/']",
+    ]);
+    const priceText = firstText(root, [
+      ".price-value",
+      ".price strong",
+      "[class*='price-value']",
+      "[class*='Price_price']",
+    ]);
+    const price = parsePrice(priceText);
+    if (!name || !price) continue;
+
+    const allText = (root.innerText || root.textContent || "").trim();
+    const isAd = /광고|AD\b/i.test(allText);
+    const isRocket = /로켓배송|로켓프레시|로켓와우/.test(allText);
+    const delivery = firstText(root, [
+      ".arrival-info",
+      ".delivery",
+      "[class*='delivery']",
+      "[class*='Delivery']",
+    ]);
+
+    seen.add(url);
+    candidates.push({ name, price, url, isAd, isRocket, delivery });
+    if (candidates.length >= limit) break;
+  }
+  return {
+    candidates,
+    pageTitle: document.title,
+    blocked: /접근이 제한|자동화된 접근|captcha|로봇이 아닙니다/i.test(
+      document.body?.innerText || "",
+    ),
+  };
+}
+
+function normalizeSearchText(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, "");
+}
+
+function rankSearchCandidates(ingredient, candidates) {
+  const needle = normalizeSearchText(ingredient);
+  return candidates
+    .map((candidate) => {
+      const haystack = normalizeSearchText(candidate.name);
+      let score = 0;
+      if (haystack.includes(needle)) score += 100;
+      for (const token of String(ingredient || "").split(/\s+/).filter(Boolean)) {
+        if (haystack.includes(normalizeSearchText(token))) score += 20;
+      }
+      if (candidate.isRocket) score += 8;
+      if (candidate.isAd) score -= 15;
+      score -= Math.min(candidate.price / 10000, 20);
+      return { ...candidate, score: Math.round(score * 100) / 100 };
+    })
+    .sort((a, b) => b.score - a.score || a.price - b.price);
+}
+
+async function searchOneIngredient(item) {
+  const ingredient = item.ingredient;
+  const query = [ingredient, item.quantityText].filter(Boolean).join(" ");
+  const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(query)}`;
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: searchUrl, active: false });
+    await waitForTabComplete(tab.id);
+    await delay(900);
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractSearchCandidatesInPage,
+      args: [SEARCH_RESULT_LIMIT],
+    });
+    const result = injected && injected[0] && injected[0].result;
+    const candidates = rankSearchCandidates(ingredient, result?.candidates || []);
+    const selected = candidates[0] || null;
+    return {
+      ingredient,
+      status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
+      searchUrl,
+      selected,
+      candidates,
+      message: selected
+        ? `${candidates.length}개 후보 중 상품을 선택했습니다.`
+        : result?.blocked
+          ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
+          : "검색 결과에서 상품 정보를 찾지 못했습니다.",
+    };
+  } catch (e) {
+    return {
+      ingredient,
+      status: "failed",
+      searchUrl,
+      selected: null,
+      candidates: [],
+      message: "상품 검색에 실패했습니다: " + (e && e.message ? e.message : e),
+    };
+  } finally {
+    if (tab?.id) {
+      try {
+        await chrome.tabs.remove(tab.id);
+      } catch (e) {}
+    }
+  }
+}
+
+async function searchProducts(items, senderTabId, reqId) {
+  const results = new Array(items.length);
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      sendProgress(senderTabId, reqId, {
+        phase: "search-start",
+        index: i,
+        total: items.length,
+        itemName: items[i].ingredient,
+      }, "FRIDGEMATE_SEARCH_PROGRESS");
+      results[i] = await searchOneIngredient(items[i]);
+      done++;
+      sendProgress(senderTabId, reqId, {
+        phase: "search-done",
+        index: i,
+        total: items.length,
+        done,
+        result: results[i],
+      }, "FRIDGEMATE_SEARCH_PROGRESS");
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(SEARCH_CONCURRENCY, items.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  chrome.tabs.sendMessage(senderTabId, {
+    type: "FRIDGEMATE_SEARCH_RESULT",
+    reqId,
+    response: { results },
+  });
+}
+
 function waitForTabComplete(tabId, timeout = NAV_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -231,10 +411,10 @@ async function processItem(item) {
   }
 }
 
-function sendProgress(senderTabId, reqId, payload) {
+function sendProgress(senderTabId, reqId, payload, type = "FRIDGEMATE_EXEC_PROGRESS") {
   try {
     chrome.tabs.sendMessage(senderTabId, {
-      type: "FRIDGEMATE_EXEC_PROGRESS",
+      type,
       reqId,
       ...payload,
     });
@@ -309,6 +489,8 @@ async function executeCart(items, senderTabId, reqId) {
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === "FRIDGEMATE_EXEC_CART" && sender.tab) {
     executeCart(msg.items || [], sender.tab.id, msg.reqId);
+  } else if (msg && msg.type === "FRIDGEMATE_SEARCH_PRODUCTS" && sender.tab) {
+    searchProducts(msg.items || [], sender.tab.id, msg.reqId);
   }
   return false;
 });
