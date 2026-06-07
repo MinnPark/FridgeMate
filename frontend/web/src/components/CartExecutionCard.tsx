@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  buildCoupangIngredientSearchUrl,
   formatKRW,
   openCoupangCartPage,
   openCoupangSearch,
@@ -74,6 +75,23 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
   const targetCount = shopping.items.filter(
     (item) => item.productUrl || selectedByIngredient.has(item.name),
   ).length;
+  const searchedTotal = shopping.items.reduce(
+    (sum, item) =>
+      sum + (selectedByIngredient.get(item.name)?.price ?? item.priceKrw),
+    0,
+  );
+  const hasConfirmedPrices =
+    shopping.items.length > 0 &&
+    shopping.items.every(
+      (item) => item.priceKrw > 0 || selectedByIngredient.has(item.name),
+    );
+  const displayedTotal = hasConfirmedPrices
+    ? searchedTotal
+    : shopping.estimatedCostKrw;
+  const displayedWithinBudget =
+    shopping.budgetKrw === undefined ||
+    !hasConfirmedPrices ||
+    searchedTotal <= shopping.budgetKrw;
 
   function buildExecItems(): CartExecuteItem[] {
     return shopping.items.map((item) => ({
@@ -229,20 +247,35 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           </p>
           {hasItems ? (
             <ul className="space-y-1.5">
-              {shopping.items.map((item) => (
+              {shopping.items.map((item, index) => (
                 <li
-                  key={item.name}
+                  key={`${item.name}-${item.quantity}-${index}`}
                   className="flex items-center gap-2 text-sm"
                 >
                   <span className="font-medium">{item.name}</span>
                   <span className="text-xs text-white/40">{item.quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openCoupangSearch(buildCoupangIngredientSearchUrl(item.name))
+                    }
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs text-white/55 transition hover:bg-white/10 hover:text-white"
+                    title={`${item.name}만 쿠팡에서 검색`}
+                    aria-label={`${item.name}만 쿠팡에서 검색`}
+                  >
+                    🔍
+                  </button>
                   {item.isAlternative && (
                     <span className="rounded bg-amber-400/15 px-1 text-[10px] text-amber-300">
                       대체재
                     </span>
                   )}
                   <span className="ml-auto text-white/70">
-                    {formatKRW(item.priceKrw)}
+                    {selectedByIngredient.has(item.name)
+                      ? formatKRW(selectedByIngredient.get(item.name)!.price)
+                      : item.priceKrw > 0
+                        ? formatKRW(item.priceKrw)
+                        : "검색 후 확정"}
                   </span>
                 </li>
               ))}
@@ -253,15 +286,17 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           <div className="mt-3 flex items-center justify-between border-t border-white/5 pt-2 text-sm">
             <span className="text-white/55">예상 총액</span>
             <span className="text-lg font-bold">
-              {formatKRW(shopping.estimatedCostKrw)}
-              {shopping.budgetKrw !== undefined && (
+              {displayedTotal > 0
+                ? formatKRW(displayedTotal)
+                : "상품 검색 후 계산"}
+              {shopping.budgetKrw !== undefined && hasConfirmedPrices && (
                 <span
                   className={[
                     "ml-2 text-xs font-normal",
-                    shopping.withinBudget ? "text-lime-accent" : "text-red-300",
+                    displayedWithinBudget ? "text-lime-accent" : "text-red-300",
                   ].join(" ")}
                 >
-                  예산 {shopping.withinBudget ? "이내" : "초과"}
+                  예산 {displayedWithinBudget ? "이내" : "초과"}
                 </span>
               )}
             </span>
@@ -354,7 +389,7 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           {/* 보조 액션 */}
           <div className="mt-3 grid grid-cols-3 gap-1.5">
             <SmallBtn onClick={() => openCoupangSearch(searchUrl)} disabled={!searchUrl}>
-              🔍 검색 결과
+              🔍 첫 재료 검색
             </SmallBtn>
             <SmallBtn onClick={copyUrl} disabled={!searchUrl}>
               {copied ? "복사됨" : "🔗 URL 복사"}
@@ -438,14 +473,7 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           <li>
             검색 상품 총액:{" "}
             <b>
-              {formatKRW(
-                shopping.items.reduce(
-                  (sum, item) =>
-                    sum +
-                    (selectedByIngredient.get(item.name)?.price ?? item.priceKrw),
-                  0,
-                ),
-              )}
+              {formatKRW(searchedTotal)}
             </b>
           </li>
         </ul>

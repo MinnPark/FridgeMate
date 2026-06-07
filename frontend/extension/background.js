@@ -224,7 +224,9 @@ function rankSearchCandidates(ingredient, candidates) {
 
 async function searchOneIngredient(item) {
   const ingredient = item.ingredient;
-  const query = [ingredient, item.quantityText].filter(Boolean).join(" ");
+  // 필요량(예: 270g)은 실제 판매 단위와 다를 수 있어 검색어를 과도하게 제한한다.
+  // 후보 수집은 재료명 하나로 하고, 필요량은 후속 상품/구매수량 판단에 사용한다.
+  const query = ingredient;
   const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(query)}`;
   let tab;
   try {

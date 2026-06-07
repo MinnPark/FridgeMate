@@ -40,6 +40,11 @@ def create_weekly_plan(state: FridgeMateState) -> dict:
     # recipe_agent가 검색한 레시피 이름 목록 → LLM에 전달
     recipe_titles = [r.get("name", "") for r in selected_recipes]
 
+    def recipe_at(index: int, default: str) -> str:
+        if recipe_titles:
+            return recipe_titles[index % len(recipe_titles)]
+        return default
+
     # LLM 실패 시 fallback (selected_recipes 기반으로 자동 구성)
     fallback = {
         "note": "임박 재료를 앞쪽 일자에 배치했어요.",
@@ -47,25 +52,25 @@ def create_weekly_plan(state: FridgeMateState) -> dict:
             {
                 "label": "1일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": recipe_titles[1] if len(recipe_titles) > 1 else "브로콜리 계란 스크램블",    "usesPriorityItem": True},
-                    {"slot": "점심", "recipeTitle": recipe_titles[0] if recipe_titles         else "닭가슴살 두부 강된장 덮밥",   "usesPriorityItem": True},
-                    {"slot": "저녁", "recipeTitle": recipe_titles[2] if len(recipe_titles) > 2 else "닭가슴살 두부 스테이크",     "usesPriorityItem": True},
+                    {"slot": "아침", "recipeTitle": recipe_at(1, "브로콜리 계란 스크램블"), "usesPriorityItem": True},
+                    {"slot": "점심", "recipeTitle": recipe_at(0, "닭가슴살 두부 강된장 덮밥"), "usesPriorityItem": True},
+                    {"slot": "저녁", "recipeTitle": recipe_at(2, "닭가슴살 두부 스테이크"), "usesPriorityItem": True},
                 ],
             },
             {
                 "label": "2일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": "그릭요거트 + 방울토마토"},
-                    {"slot": "점심", "recipeTitle": recipe_titles[0] if recipe_titles         else "닭가슴살 두부 강된장 덮밥"},
-                    {"slot": "저녁", "recipeTitle": recipe_titles[1] if len(recipe_titles) > 1 else "브로콜리 계란 스크램블"},
+                    {"slot": "아침", "recipeTitle": recipe_at(0, "그릭요거트 + 방울토마토")},
+                    {"slot": "점심", "recipeTitle": recipe_at(1, "닭가슴살 두부 강된장 덮밥")},
+                    {"slot": "저녁", "recipeTitle": recipe_at(2, "브로콜리 계란 스크램블")},
                 ],
             },
             {
                 "label": "3일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": "계란 현미 주먹밥"},
-                    {"slot": "점심", "recipeTitle": recipe_titles[2] if len(recipe_titles) > 2 else "닭가슴살 두부 스테이크"},
-                    {"slot": "저녁", "recipeTitle": "닭가슴살 채소 볶음"},
+                    {"slot": "아침", "recipeTitle": recipe_at(2, "계란 현미 주먹밥")},
+                    {"slot": "점심", "recipeTitle": recipe_at(0, "닭가슴살 두부 스테이크")},
+                    {"slot": "저녁", "recipeTitle": recipe_at(1, "닭가슴살 채소 볶음")},
                 ],
             },
         ],
@@ -88,9 +93,27 @@ def create_weekly_plan(state: FridgeMateState) -> dict:
     plan.setdefault("note", fallback["note"])
     plan.setdefault("days", fallback["days"])
 
+    # Shopping Agent는 meal_plan의 recipeTitle을 selected_recipes와 이름으로 매핑한다.
+    # LLM이 목록 밖 레시피를 만들면 재료 계산이 누락되므로 허용 목록으로 보정한다.
+    plan = _constrain_recipe_titles(plan, recipe_titles)
+
     # usesPriorityItem 자동 보정 (LLM이 누락하거나 틀렸을 때 대비)
     plan = _mark_priority_items(plan, pantry_items)
 
+    return plan
+
+
+def _constrain_recipe_titles(plan: dict, recipe_titles: list[str]) -> dict:
+    if not recipe_titles:
+        return plan
+
+    index = 0
+    allowed = set(recipe_titles)
+    for day in plan.get("days", []):
+        for entry in day.get("entries", []):
+            if entry.get("recipeTitle") not in allowed:
+                entry["recipeTitle"] = recipe_titles[index % len(recipe_titles)]
+            index += 1
     return plan
 
 

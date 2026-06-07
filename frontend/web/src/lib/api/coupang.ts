@@ -19,6 +19,11 @@ export function openCoupangSearch(searchUrl?: string | null): boolean {
   return openUrl(searchUrl);
 }
 
+/** 재료 하나만 검색하는 쿠팡 URL을 만든다. */
+export function buildCoupangIngredientSearchUrl(ingredient: string): string {
+  return `https://www.coupang.com/np/search?q=${encodeURIComponent(ingredient.trim())}`;
+}
+
 /** 장바구니 URL 우선, 없으면 검색 URL 로 폴백해 새 탭으로 연다. */
 export function openCoupangCart(cart: CartResponse): boolean {
   return openUrl(cart.coupangCartUrl || cart.coupangSearchUrl);
