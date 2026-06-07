@@ -199,6 +199,13 @@ function formatMissingQuantity(
   return `${value}${unit ?? ""}`;
 }
 
+// 개수로 사는 과일류(무게→개 환산 대상). 무게/팩으로 파는 베리류(딸기·포도·블루베리 등)는 제외.
+const FRUITS = new Set([
+  "사과", "배", "바나나", "귤", "오렌지", "감", "단감", "홍시", "복숭아", "천도복숭아",
+  "자두", "키위", "레몬", "라임", "자몽", "망고", "참외", "멜론", "수박", "파인애플",
+  "석류", "아보카도", "살구", "한라봉", "천혜향", "유자", "모과", "무화과", "파파야",
+]);
+
 function mapMissingToShoppingItems(
   missing: NonNullable<ChatState["missing_ingredients"]>,
 ): ShoppingItem[] {
@@ -236,10 +243,16 @@ function mapMissingToShoppingItems(
 
   return Array.from(grouped, ([name, value]) => {
     // 한 재료에 무게·부피가 섞이면 무게(g)를 우선.
-    const neededAmount =
+    let neededAmount: number | undefined =
       value.totalG > 0 ? value.totalG : value.totalMl > 0 ? value.totalMl : undefined;
-    const neededUnit: "g" | "ml" | undefined =
+    let neededUnit: "g" | "ml" | "개" | undefined =
       value.totalG > 0 ? "g" : value.totalMl > 0 ? "ml" : undefined;
+    // 과일류: 무게가 잡히면 개수로 환산(일괄 200g/개, 200g 미만이면 1개).
+    //  g로 검색하면 사과칩·말랭이 등 가공품이 떠서, 개 단위는 이름만으로 검색하게 한다.
+    if (FRUITS.has(name) && value.totalG > 0) {
+      neededAmount = Math.max(1, Math.ceil(value.totalG / 200));
+      neededUnit = "개";
+    }
     return {
       name,
       quantity: value.quantities.join(" + "),

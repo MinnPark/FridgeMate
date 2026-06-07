@@ -162,7 +162,7 @@ export interface ShoppingItem {
   productUrl?: string; // 쿠팡 상품 URL (자동 담기 대상, 없으면 skipped) — mock/API 제공
   score?: ScoreInfo; // 상품 점수 (mock/백엔드 제공)
   neededAmount?: number; // 필요 총량(neededUnit 기준). 검색 상품 용량과 비교해 담을 개수 산정용.
-  neededUnit?: "g" | "ml"; // 필요 총량 단위 계열(무게 g / 부피 ml).
+  neededUnit?: "g" | "ml" | "개"; // 단위 계열(무게 g / 부피 ml / 과일 개).
 }
 
 export interface ShoppingList {
