@@ -30,6 +30,47 @@ class NormalizedRecipe(TypedDict):
 
 _STEP_VERBS = re.compile(r"(볶|끓|찌|굽|튀기|삶|데치|썰|손질|버무리|섞|넣)")
 
+# cookrcp 재료 텍스트(RCP_PARTS_DTLS) 파싱 ─────────────────────────────────
+# 미터법(g/ml...) 우선 + 가정용 계량. 기호로 시작하는 단위(예: %)는 의도적으로 제외.
+_ING_UNIT = (r"kg|g|mg|ml|l|개|마리|봉지|봉|장|모|컵|큰술|작은술|꼬집|줌|쪽|단|알"
+             r"|조각|대|cm|인분|미|편|통|줄기|포기|뿌리|국자|스푼|T|t")
+_ING_UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(" + _ING_UNIT + r")")
+_ING_AMT_NONE_RE = re.compile(r"약간|적당량|적당히|조금|소량|기호")
+# 재료가 아닌 섹션 머리말 — 단독으로 오면 스킵 (소스 텍스트에 '●양념장' 등 헤더가 섞임)
+_ING_SECTIONS = {"고명", "양념", "양념장", "소스", "부재료", "주재료", "재료", "육수",
+                 "국물", "반죽", "고물", "곁들임", "드레싱", "육수재료", "양념재료"}
+
+
+def _parse_cookrcp_ingredient(token: str, dish_nospace: str) -> dict | None:
+    """RCP_PARTS_DTLS 한 토큰 → {name, qty, unit} 또는 None(섹션/제목/빈값).
+
+    소스 예: '연두부 75g(3/4모)', '●양념장 : 고춧가루 4g(1작은술)', '[1인분]조선부추 50g', '통깨 약간'.
+    미터법 수치가 가정용 계량 앞에 오므로 첫 수치+단위를 분량으로, 그 앞을 이름으로 취한다.
+    """
+    t = token.strip()
+    if not t:
+        return None
+    if ":" in t or "：" in t:                        # '●양념장 : 재료' → 콜론 뒤 실제 재료만
+        t = re.split(r"[:：]", t, maxsplit=1)[-1].strip()
+    t = re.sub(r"^[\[\(][^\]\)]*[\]\)]\s*", "", t)   # 선두 분량표기 [1인분]/(4인분) 제거
+    t = t.lstrip("●·*-•◦∙▶▪ ").strip()
+    if not t or t in _ING_SECTIONS:
+        return None
+    if t.replace(" ", "") == dish_nospace:           # 첫 줄에 박힌 요리명
+        return None
+    m = _ING_UNIT_RE.search(t)
+    if m:
+        name = t[:m.start()].strip().rstrip(":").strip()
+        qty, unit = float(m.group(1)), m.group(2)
+    else:                                            # '약간/적당량' → 수치 없는 실재료
+        a = _ING_AMT_NONE_RE.search(t)
+        name = (t[:a.start()] if a else t).strip()
+        qty, unit = None, ("약간" if a else "")
+    name = name.strip(" ,.·-()")
+    if not name or len(name) > 20:                   # 설명문 등 노이즈 컷
+        return None
+    return {"name": name, "qty": qty, "unit": unit}
+
 
 def _extract_core_verbs(steps: list[str], limit: int = 3) -> list[str]:
     """레시피 단계에서 핵심 동사 추출 (검색 토큰화에 활용)."""
@@ -46,9 +87,9 @@ def make_embed_text(recipe: dict) -> str:
     name = recipe["name"]
     ingredients = ", ".join(i["name"] for i in recipe["ingredients"])      # 전체 재료 (recall)
     steps = " ".join(recipe.get("steps") or [])[:400]                       # 과정 텍스트(방법 의미) — 희석 방지 컷
-    kcal = recipe.get("calories", 0)
-    protein = recipe.get("protein", 0)
-    time_min = recipe.get("time_min", 0)
+    kcal = recipe.get("calories") or 0                                      # None(영양 미수집) → 0 (검색텍스트 오염 방지)
+    protein = recipe.get("protein") or 0
+    time_min = recipe.get("time_min") or 0
     cuisine = recipe.get("cuisine_type", "기타")
     return (
         f"{name} 재료: {ingredients} 조리: {steps} "
@@ -59,19 +100,12 @@ def make_embed_text(recipe: dict) -> str:
 def normalize_cookrcp(raw: dict, idx: int) -> NormalizedRecipe:
     """식약처 COOKRCP01 raw → 표준."""
     name = (raw.get("RCP_NM") or "").strip()
-    ingredients_raw = (raw.get("RCP_PARTS_DTLS") or "")
+    dish_nospace = name.replace(" ", "")
     ingredients = []
-    for part in re.split(r"[,\n]", ingredients_raw):
-        token = part.strip()
-        if not token:
-            continue
-        m = re.match(r"([가-힣A-Za-z\s]+)\s*(\d+(?:\.\d+)?)?\s*(g|kg|ml|개|마리|봉|장|모|컵|큰술|작은술)?", token)
-        if m:
-            ingredients.append({
-                "name": m.group(1).strip(),
-                "qty": float(m.group(2)) if m.group(2) else None,
-                "unit": m.group(3) or "",
-            })
+    for part in re.split(r"[,\n]", raw.get("RCP_PARTS_DTLS") or ""):
+        item = _parse_cookrcp_ingredient(part, dish_nospace)
+        if item:
+            ingredients.append(item)
 
     steps = []
     for k in [f"MANUAL{i:02d}" for i in range(1, 21)]:

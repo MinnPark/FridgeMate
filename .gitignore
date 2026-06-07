@@ -33,6 +33,14 @@ Thumbs.db
 # 노트북 실험 산출물 (재생성물 — data/chroma 는 추적하지만 lab 은 무시)
 backend/data/lab/
 
+# 데이터 파이프라인: 대용량 중간 산출물(재생성물, s0~s3로 재생성)은 무시.
+# 투명성 산출물(품질 리포트·미리보기·수집 매니페스트)만 추적 = 팀이 실태를 코드 없이 본다.
+backend/data/pipeline/00_raw/*.json
+!backend/data/pipeline/00_raw/_manifest.json
+backend/data/pipeline/01_normalized/*.json
+backend/data/pipeline/02_clean/recipes.json
+backend/data/pipeline/03_embed_ready/recipes.json
+
 # 실제 비밀키 .env (example 은 추적 — 아래 negation. *.env 광역패턴은 example까지 먹어서 안 씀)
 .env
 .env.local

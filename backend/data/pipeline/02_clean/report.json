@@ -1,0 +1,40 @@
+{
+  "corpus_count": 1689,
+  "dropped": {
+    "no_name": 0,
+    "no_ingredients": 4,
+    "dup_id": 0
+  },
+  "by_source": {
+    "cookrcp": {
+      "count": 1146,
+      "ingredients_total": 12848,
+      "ingredient_qty_filled_pct": 94.9,
+      "ingredient_unit_filled_pct": 96.4,
+      "calories_present_pct": 99.9,
+      "protein_carb_fat_present_pct": 99.9,
+      "steps_present_pct": 99.9,
+      "time_min_placeholder_pct": 100.0,
+      "time_min_note": "소스에 조리시간 필드 없음 — 30분 placeholder"
+    },
+    "mafra": {
+      "count": 537,
+      "ingredients_total": 5933,
+      "ingredient_qty_filled_pct": 80.3,
+      "ingredient_unit_filled_pct": 58.8,
+      "calories_present_pct": 94.2,
+      "protein_carb_fat_present_pct": 0.0,
+      "steps_present_pct": 100.0,
+      "nutrition_note": "단백질/탄수/지방 미수집(0) — 영양결합 서비스 수집 전까지 신뢰 불가"
+    },
+    "seed": {
+      "count": 10,
+      "ingredients_total": 52,
+      "ingredient_qty_filled_pct": 100.0,
+      "ingredient_unit_filled_pct": 100.0,
+      "calories_present_pct": 100.0,
+      "protein_carb_fat_present_pct": 100.0,
+      "steps_present_pct": 100.0
+    }
+  }
+}
