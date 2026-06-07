@@ -1,12 +1,14 @@
+import re
+
 from app.config import settings
 from app.graph.state import FridgeMateState
 from app.llm import generate_json
 from app.prompts.shopping_prompts import REACT_PROMPT, REFLEXION_PROMPT
 from app.tools.logging_tools import append_log
 from app.tools.shopping_tools import (
-    create_cart_deeplinks,             # Coupang 팀이 executor_agent에서 사용
-    search_coupang_products,           # Coupang 팀이 executor_agent에서 사용
-    validate_budget,                   # Coupang 팀이 executor_agent에서 사용
+    create_cart_deeplinks,
+    search_coupang_products,
+    validate_budget,
 )
 
 
@@ -33,6 +35,41 @@ def reflect_failure(reason: str, state: FridgeMateState) -> str:
     return result.get("reflection", fallback["reflection"])
 
 
+def _normalize_name(name: str) -> str:
+    """내부 중복 공백 제거 — "닭  가슴살" → "닭 가슴살" """
+    return " ".join(name.split()) if name else ""
+
+
+def _parse_amount(raw) -> float | None:
+    """
+    LLM 응답의 amount를 float으로 안전하게 파싱
+
+    처리 케이스:
+      12          → 12.0
+      12.5        → 12.5
+      "12"        → 12.0
+      "12g"       → 12.0   (단위가 amount에 섞인 경우)
+      "12g+3"     → 12.0   (복합 표현 → 선두 숫자만 추출)
+      "6작은술"   → 6.0    (단위가 amount에 섞인 경우)
+      "1~2"       → 1.0    (범위 표현 → 최솟값 사용)
+      "약간"      → None   (파싱 불가 → None 처리)
+      "적당량"    → None
+      None        → None
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        m = re.match(r"(\d+(?:\.\d+)?)", raw.strip())
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return None
+    return None
+
+
 def _collect_used_recipes(
     meal_plan: dict,
     selected_recipes: list[dict],
@@ -53,25 +90,23 @@ def _collect_used_recipes(
     title_counts: dict[str, int] = {}
     for day in meal_plan.get("days", []):
         for entry in day.get("entries", []):
-            title = entry.get("recipeTitle", "").strip()
+            title = _normalize_name(entry.get("recipeTitle", ""))   # ← 적용
             if title:
                 title_counts[title] = title_counts.get(title, 0) + 1
 
     # 2. selected_recipes name → recipe 역방향 매핑
     recipe_map: dict[str, dict] = {
-        r.get("name", ""): r
-        for r in selected_recipes
-        if r.get("name")
+        _normalize_name(r.get("name", "")): r               # ← 적용
+        for r in selected_recipes if r.get("name")
     }
 
     # 3. 사용 레시피 + 재료 매핑
     warnings: list[str] = []
     used_recipes: list[dict] = []
 
-    for title, count in sorted(title_counts.items()):   # 정렬 → 테스트 안정성
+    for title, count in sorted(title_counts.items()):
         recipe = recipe_map.get(title)
         if recipe is None:
-            # LLM이 selected_recipes 목록 외 레시피를 생성한 경우
             warnings.append(
                 f"'{title}' → selected_recipes에 없음 (ingredients 빈값 처리)"
             )
@@ -86,7 +121,40 @@ def _collect_used_recipes(
     return used_recipes, warnings
 
 
-def _aggregate_ingredients(used_recipes: list[dict]) -> dict[str, dict]:
+# 허용 단위 목록
+_KNOWN_UNITS = {
+    "g", "kg", "ml", "l", "개", "장", "줄", "컵",
+    "큰술", "작은술", "꼬집", "봉지", "팩", "캔",
+}
+
+def _normalize_unit(unit) -> str | None:
+    """
+    LLM 응답의 unit을 정규화
+
+    처리 케이스:
+      "g"       → "g"       (정상)
+      "g+3"     → "g"       (앞 알파벳/한글만 추출)
+      "ml "     → "ml"      (공백 제거)
+      ""        → None
+      None      → None
+      "g/개"    → "g"       (슬래시 앞 단위만 사용)
+    """
+    if not unit or not isinstance(unit, str):
+        return None
+    unit = unit.strip()
+    if not unit:
+        return None
+    # 알려진 단위면 그대로 반환
+    if unit in _KNOWN_UNITS:
+        return unit
+    # 슬래시 구분 → 앞 단위만 사용
+    unit = unit.split("/")[0].strip()
+    # 앞부분 한글+영문자만 추출 (숫자·특수문자 제거)
+    m = re.match(r"([가-힣a-zA-Z]+)", unit)
+    return m.group(1) if m else None
+
+
+def _aggregate_ingredients(used_recipes):
     """
     STEP B: 레시피별 재료를 이름 기준으로 합산
             레시피 사용 횟수(count)만큼 amount 배수 적용
@@ -110,19 +178,17 @@ def _aggregate_ingredients(used_recipes: list[dict]) -> dict[str, dict]:
         count = recipe.get("count", 1)
 
         for ing in recipe.get("ingredients", []):
-            name   = ing.get("name", "").strip()
-            amount = ing.get("amount")          # None 가능
-            unit   = ing.get("unit") or None    # "" → None 정규화
+            name = _normalize_name(ing.get("name", ""))             # ← 적용
+            amount = _parse_amount(ing.get("amount"))
+            unit   = _normalize_unit(ing.get("unit"))      # ← _normalize_unit 으로 교체
 
             if not name:
                 continue
 
-            # amount × 식단 사용 횟수
             scaled_amount: float | None = (
                 amount * count if amount is not None else None
             )
 
-            # unit이 다른 같은 재료 → 별도 키 (합산 불가)
             agg_key = f"{name}||{unit}" if unit else name
 
             if agg_key not in aggregated:
@@ -134,17 +200,12 @@ def _aggregate_ingredients(used_recipes: list[dict]) -> dict[str, dict]:
                 }
             else:
                 existing = aggregated[agg_key]
-
-                # needed_by 추가 (중복 방지)
                 if title not in existing["needed_by"]:
                     existing["needed_by"].append(title)
-
-                # amount 합산: 둘 다 숫자인 경우만
                 if existing["amount"] is not None and scaled_amount is not None:
                     existing["amount"] += scaled_amount
                 elif existing["amount"] is None and scaled_amount is not None:
                     existing["amount"] = scaled_amount
-                # existing이 숫자고 scaled_amount가 None → 기존값 유지
 
     return aggregated
 
@@ -161,10 +222,9 @@ def _calc_missing(
 
     출력: [{"name", "amount", "unit", "needed_by"}]  이름 오름차순 정렬
     """
-    pantry_names: set[str] = {
-        item.get("name", "").strip()
-        for item in pantry_items
-        if item.get("name")
+    pantry_names = {
+        _normalize_name(item.get("name", ""))               # ← 적용
+        for item in pantry_items if item.get("name")
     }
 
     missing: list[dict] = [
@@ -178,7 +238,6 @@ def _calc_missing(
         if item["name"] not in pantry_names
     ]
 
-    # 이름 오름차순 정렬 → UI 일관성 + 테스트 안정성
     missing.sort(key=lambda x: x["name"])
     return missing
 
