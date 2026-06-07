@@ -41,7 +41,7 @@ TEAMMATE_CONTRACT_KEYS = REQUIRED_CONTRACT_KEYS + ("citation_url", "final_score"
 _INGREDIENT_KEYS = ("name", "amount", "unit")           # ✅ 실제 일치 (우리 qty→amount)
 _NUTRITION_KEYS = ("calories", "protein", "carbs", "fat")  # ✅ 실제 일치 (우리 carb→carbs)
 
-HYDE_THRESHOLD = 10  # 보고서/실제 choose_rag_strategy 동일 (단 실제는 공백제거 후 길이)
+HYDE_THRESHOLD = 10  # choose_rag_strategy 와 동일 기준: 공백 제거 후 길이
 
 # 그쪽 choose_rag_strategy 반환명 → 우리 search strategy 매핑 (실제 3전략 확인됨)
 THEIR_STRATEGY = {"HyDE": "hyde", "RAG-Fusion": "rag_fusion", "Basic-RAG": "basic"}
@@ -52,7 +52,24 @@ def _score_of(d: dict) -> float:
     if isinstance(d.get("_rrf_score"), (int, float)):
         return round(float(d["_rrf_score"]), 5)
     dist = d.get("distance")
-    return round(1.0 - float(dist), 4) if isinstance(dist, (int, float)) else 0.0
+    # cosine distance 는 [0,2] 라 1-dist 가 음수가 될 수 있어 0 으로 클램프
+    return round(max(0.0, 1.0 - float(dist)), 4) if isinstance(dist, (int, float)) else 0.0
+
+
+def _normalize_scores(results: list[dict]) -> None:
+    """전략별 score 스케일 차이(HyDE 1-dist ~0.7 / RAG-Fusion RRF ~0.02)를
+    리스트 내 min-max 로 0..1 공통화한다. 끼니 누적·프론트 정렬에서 Fusion 결과가
+    구조적으로 바닥에 깔리는 문제 방지. 리스트 내부 순위는 보존(상위=1.0).
+    (튜닝 사유: docs/rag-tuning-changelog.md 변경2)"""
+    if not results:
+        return
+    raw_scores = [r["score"] for r in results]
+    lo, hi = min(raw_scores), max(raw_scores)
+    span = (hi - lo) or 1.0
+    for r in results:
+        norm = round((r["score"] - lo) / span, 5)
+        r["score"] = norm
+        r["final_score"] = norm
 
 
 def to_contract(d: dict) -> dict:
@@ -139,7 +156,7 @@ async def search(
     if not isinstance(query, str) or not query.strip():
         raise ValueError("[rag.integration] query 는 비어있지 않은 문자열이어야 함")
     constraints = constraints or {}
-    chosen = strategy or ("hyde" if len(query.strip()) < HYDE_THRESHOLD else "rag_fusion")
+    chosen = strategy or ("hyde" if len(query.strip().replace(" ", "")) < HYDE_THRESHOLD else "rag_fusion")
 
     key = (query.strip(), k, chosen, constraints.get("cuisine_filter"), constraints.get("max_time"))
     if use_cache and (cached := _cache_get(key)) is not None:
@@ -156,6 +173,7 @@ async def search(
         raw = await smart_search(query, k=k)  # 안전 폴백
 
     results = [to_contract(d) for d in raw]
+    _normalize_scores(results)  # 전략 무관 0..1 공통 스케일 (점수 스케일 통일)
     trace = {
         "strategy": chosen,
         "original_query": query,

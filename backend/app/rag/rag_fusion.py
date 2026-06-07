@@ -90,8 +90,11 @@ async def rag_fusion_search(
     if not queries:
         return await search_recipes(query, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
 
+    # RRF 융합 이득은 후보 풀이 클수록 커진다. 서브쿼리는 넓게(k_fetch) 뽑고  (튜닝 사유: docs/rag-tuning-changelog.md 변경1)
+    # 융합 후 k_top=k 로 자른다. (fetch==final 이면 4쿼리×k 에서 k 뽑기라 융합이 형식만 남음)
+    k_fetch = max(k * 3, 20)
     gathered = await asyncio.gather(*[
-        search_recipes(q, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
+        search_recipes(q, k=k_fetch, cuisine_filter=cuisine_filter, max_time=max_time)
         for q in queries
     ], return_exceptions=True)
     results: list[list[dict]] = []
