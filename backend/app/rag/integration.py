@@ -52,7 +52,23 @@ def _score_of(d: dict) -> float:
     if isinstance(d.get("_rrf_score"), (int, float)):
         return round(float(d["_rrf_score"]), 5)
     dist = d.get("distance")
-    return round(1.0 - float(dist), 4) if isinstance(dist, (int, float)) else 0.0
+    # cosine distance 는 [0,2] 라 1-dist 가 음수가 될 수 있어 0 으로 클램프
+    return round(max(0.0, 1.0 - float(dist)), 4) if isinstance(dist, (int, float)) else 0.0
+
+
+def _normalize_scores(results: list[dict]) -> None:
+    """H4: 전략별 score 스케일 차이(HyDE 1-dist ~0.7 / RAG-Fusion RRF ~0.02)를
+    리스트 내 min-max 로 0..1 공통화한다. 끼니 누적·프론트 정렬에서 Fusion 결과가
+    구조적으로 바닥에 깔리는 문제 방지. 리스트 내부 순위는 보존(상위=1.0)."""
+    if not results:
+        return
+    raw_scores = [r["score"] for r in results]
+    lo, hi = min(raw_scores), max(raw_scores)
+    span = (hi - lo) or 1.0
+    for r in results:
+        norm = round((r["score"] - lo) / span, 5)
+        r["score"] = norm
+        r["final_score"] = norm
 
 
 def to_contract(d: dict) -> dict:
@@ -156,6 +172,7 @@ async def search(
         raw = await smart_search(query, k=k)  # 안전 폴백
 
     results = [to_contract(d) for d in raw]
+    _normalize_scores(results)  # H4: 전략 무관 0..1 공통 스케일
     trace = {
         "strategy": chosen,
         "original_query": query,
