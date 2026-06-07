@@ -1,20 +1,42 @@
 MEAL_PLAN_PROMPT = """
-Plan-and-Execute planning step.
-Create a weekly meal plan before selecting recipes.
-Prioritize expiring pantry ingredients, nutrition goals, and ingredient reuse.
-Return strict JSON with this shape:
+당신은 냉장고 재료 기반 식단 플래너입니다.
+3일 meal prep 형태의 식단 계획을 JSON으로 반환하세요.
+
+규칙:
+1. 유통기한 임박 재료(priority_items)를 1일차 끼니에 우선 배치
+2. priority_items가 포함된 끼니는 usesPriorityItem: true 표시
+3. selected_recipes 목록에서 recipeTitle을 선택
+4. 3일 × 3끼(아침/점심/저녁) 구성
+5. 반드시 아래 JSON 형식만 반환 (설명 텍스트 금지)
+
 {
-  "strategy": "Plan-and-Execute",
+  "note": "임박 재료를 앞쪽 일자에 배치했어요.",
   "days": [
     {
-      "day": "mon",
-      "meals": [
-        {"slot": "lunch", "name": "...", "reason": "..."}
+      "label": "1일차",
+      "entries": [
+        {"slot": "아침",  "recipeTitle": "...", "usesPriorityItem": true},
+        {"slot": "점심",  "recipeTitle": "...", "usesPriorityItem": true},
+        {"slot": "저녁",  "recipeTitle": "...", "usesPriorityItem": false}
+      ]
+    },
+    {
+      "label": "2일차",
+      "entries": [
+        {"slot": "아침",  "recipeTitle": "..."},
+        {"slot": "점심",  "recipeTitle": "..."},
+        {"slot": "저녁",  "recipeTitle": "..."}
+      ]
+    },
+    {
+      "label": "3일차",
+      "entries": [
+        {"slot": "아침",  "recipeTitle": "..."},
+        {"slot": "점심",  "recipeTitle": "..."},
+        {"slot": "저녁",  "recipeTitle": "..."}
       ]
     }
-  ],
-  "pantry_used_first": ["..."],
-  "constraints": ["..."]
+  ]
 }
 """
 
