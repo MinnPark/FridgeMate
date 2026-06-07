@@ -216,6 +216,7 @@ export interface HealthResponse {
 export interface CartExecuteItem {
   ingredient: string;
   productUrl?: string;
+  productName?: string;
   searchUrl?: string;
   quantity?: number;
   optionText?: string;
@@ -232,6 +233,7 @@ export type CartAddStatus = "success" | "failed" | "skipped";
 
 export interface CartAddResult {
   itemName: string;
+  productName?: string;
   productUrl?: string;
   status: CartAddStatus;
   message: string;

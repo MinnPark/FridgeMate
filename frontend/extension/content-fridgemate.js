@@ -1,13 +1,17 @@
-// FridgeMate Cart Helper - content script (localhost:3000 페이지에 주입)
+// FridgeMate Cart Helper - content script (localhost 개발 페이지에 주입)
 //
 // FridgeMate 웹페이지 ↔ 익스텐션 background 사이의 다리(bridge).
 // 페이지는 window.postMessage 로만 통신하므로 chrome.* 를 직접 알 필요가 없다.
 
 // 1) 익스텐션 설치/활성 알림 (페이지가 버튼 활성화 여부 판단에 사용).
 function announce() {
-  window.postMessage({ type: "FRIDGEMATE_EXT_READY" }, "*");
+  if (!extensionAlive()) return;
+  let version = "unknown";
+  try {
+    version = chrome.runtime.getManifest().version;
+  } catch (e) {}
+  window.postMessage({ type: "FRIDGEMATE_EXT_READY", version }, "*");
 }
-announce();
 
 // 확장 컨텍스트가 살아있는지 확인(확장 새로고침 후 orphan content script 방지).
 function extensionAlive() {
@@ -17,6 +21,8 @@ function extensionAlive() {
     return false;
   }
 }
+
+announce();
 
 // 2) 페이지 → background
 window.addEventListener("message", (e) => {

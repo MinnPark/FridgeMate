@@ -9,37 +9,241 @@
 const NAV_TIMEOUT_MS = 20000;
 const CLICK_ATTEMPTS = 10; // 버튼이 렌더될 때까지 짧게 재시도
 const CLICK_GAP_MS = 350;
-const SETTLE_MS = 1000; // 클릭 후 담기 요청이 서버에 반영될 시간(탭을 너무 빨리 닫지 않도록)
+const CART_CONFIRM_TIMEOUT_MS = 4000;
+const CART_CONFIRM_GAP_MS = 500;
+const CART_NAV_SETTLE_MS = 1200;
 const QTY_SETTLE_MS = 1500; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전). 1000은 짧아 1개로 담기는 사례 → 1500.
-const CONCURRENCY = 5; // 동시에 처리할 상품 탭 수(속도↑). 너무 크면 쿠팡 봇 의심/리소스 부담.
-const SEARCH_CONCURRENCY = 2;
 const SEARCH_RESULT_LIMIT = 24;
+const SEARCH_RENDER_ATTEMPTS = 10;
+const SEARCH_RENDER_GAP_MS = 800;
+const SEARCH_MIN_GAP_MS = 4000;
+const SEARCH_MAX_GAP_MS = 7000;
+const SEARCH_BATCH_SIZE = 5;
+const SEARCH_BATCH_COOLDOWN_MS = 15000;
+const CART_ITEM_MIN_GAP_MS = 1000;
+const CART_ITEM_MAX_GAP_MS = 1800;
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
 // 페이지 컨텍스트에서 실행: 장바구니 담기 버튼만 찾아 클릭.
 function clickAddToCartInPage() {
   const FORBIDDEN = ["바로구매", "구매하기", "결제", "주문"];
-  const els = Array.from(
-    document.querySelectorAll("button, a, input[type=button], input[type=submit]")
-  );
-  const btn = els.find((el) => {
-    // 헤더의 '장바구니' 네비게이션 링크(담기 아님)는 제외 → cart.coupang.com 으로 가는 링크 배제.
+  const textOf = (el) =>
+    [
+      el.innerText,
+      el.textContent,
+      el.value,
+      el.getAttribute?.("aria-label"),
+      el.getAttribute?.("title"),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const isForbidden = (el) => {
     const href = (el.getAttribute && el.getAttribute("href")) || "";
-    if (/cart\.coupang\.com/.test(href)) return false;
-    const t = (el.innerText || el.value || "").trim();
-    if (!t) return false;
-    if (FORBIDDEN.some((f) => t.includes(f))) return false;
-    // '장바구니' 단독(헤더 네비)으로는 매칭하지 않고, 실제 담기 버튼 문구만 매칭.
-    return t.includes("장바구니 담기");
-  });
-  if (!btn) return { status: "notfound" };
+    if (/cart\.coupang\.com/.test(href)) return true;
+    const text = textOf(el);
+    return (
+      FORBIDDEN.some((word) => text.includes(word)) ||
+      Boolean(el.closest?.("header, nav, [role='navigation']"))
+    );
+  };
+  const selectors = [
+    "button.prod-cart-btn",
+    "button[class*='prod-cart']",
+    "button[class*='add-to-cart' i]",
+    "button[class*='addToCart']",
+    "[role='button'][class*='prod-cart']",
+    "button, [role='button'], input[type=button], input[type=submit], a",
+  ];
+  const seen = new Set();
+  const els = selectors.flatMap((selector) =>
+    Array.from(document.querySelectorAll(selector)).filter((el) => {
+      if (seen.has(el)) return false;
+      seen.add(el);
+      return true;
+    }),
+  );
+  const scored = els
+    .filter((el) => !isForbidden(el))
+    .map((el) => {
+      const text = textOf(el);
+      const className =
+        typeof el.className === "string" ? el.className.toLowerCase() : "";
+      const dataAction = String(
+        el.getAttribute?.("data-action") ||
+          el.getAttribute?.("data-testid") ||
+          "",
+      ).toLowerCase();
+      let score = 0;
+      if (text.includes("장바구니 담기")) score += 100;
+      else if (/장바구니에?\s*담기/.test(text)) score += 90;
+      else if (text === "장바구니" || text.includes("장바구니")) score += 70;
+      if (/prod-cart|add-to-cart|addtocart/.test(className)) score += 50;
+      if (/cart/.test(dataAction)) score += 40;
+      if (el.tagName === "BUTTON") score += 10;
+      return { el, text, score };
+    })
+    .filter((candidate) => candidate.score >= 50)
+    .sort((a, b) => b.score - a.score);
+  const candidate = scored[0];
+  const btn = candidate?.el;
+  if (!btn) {
+    return {
+      status: "notfound",
+      pageTitle: document.title,
+      pageUrl: location.href,
+      buttonTexts: els
+        .map(textOf)
+        .filter(Boolean)
+        .filter((text) => text.length <= 40)
+        .slice(0, 12),
+    };
+  }
+  if (btn.disabled || btn.getAttribute("aria-disabled") === "true") {
+    return {
+      status: "disabled",
+      buttonText: candidate.text,
+      pageTitle: document.title,
+      pageUrl: location.href,
+    };
+  }
+  const readCartCount = () => {
+    const candidates = Array.from(
+      document.querySelectorAll(
+        ".my-cart-count, #cart-count, [class*='cart-count'], [class*='CartCount']",
+      ),
+    );
+    for (const el of candidates) {
+      const match = String(el.textContent || "").match(/\d+/);
+      if (match) return Number(match[0]);
+    }
+    return null;
+  };
   try {
     btn.scrollIntoView({ block: "center" });
+    const beforeCartCount = readCartCount();
     btn.click();
-    return { status: "success" };
+    return {
+      status: "clicked",
+      beforeCartCount,
+      buttonText: candidate.text,
+    };
   } catch (e) {
     return { status: "error" };
   }
+}
+
+function verifyCartAddInPage(beforeCartCount) {
+  const bodyText = document.body?.innerText || document.body?.textContent || "";
+  const successText =
+    /장바구니에\s*(상품이\s*)?담겼|상품을\s*장바구니에\s*담았|장바구니\s*담기\s*완료/i.test(
+      bodyText,
+    );
+  const errorText =
+    /옵션을\s*선택|품절|구매할\s*수\s*없|로그인이\s*필요|성인인증/i.test(bodyText);
+  const candidates = Array.from(
+    document.querySelectorAll(
+      ".my-cart-count, #cart-count, [class*='cart-count'], [class*='CartCount']",
+    ),
+  );
+  let cartCount = null;
+  for (const el of candidates) {
+    const match = String(el.textContent || "").match(/\d+/);
+    if (match) {
+      cartCount = Number(match[0]);
+      break;
+    }
+  }
+  return {
+    confirmed:
+      successText ||
+      (beforeCartCount != null && cartCount != null && cartCount > beforeCartCount),
+    errorText,
+    cartCount,
+  };
+}
+
+function verifyProductInCartPage(productUrl, productName) {
+  const identity = (() => {
+    try {
+      const url = new URL(productUrl);
+      return {
+        productId: url.pathname.match(/\/vp\/products\/(\d+)/)?.[1] || "",
+        itemId: url.searchParams.get("itemId") || "",
+        vendorItemId: url.searchParams.get("vendorItemId") || "",
+      };
+    } catch (e) {
+      return { productId: "", itemId: "", vendorItemId: "" };
+    }
+  })();
+  const roots = Array.from(
+    document.querySelectorAll(
+      "[class*='cart-deal-item'], [class*='cart-item'], [class*='CartItem'], " +
+        "[data-vendor-item-id], [data-product-id], li",
+    ),
+  );
+  const normalize = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^0-9a-z가-힣]/g, "");
+  const normalizedName = normalize(productName);
+  const namePrefix = normalizedName.slice(0, Math.min(14, normalizedName.length));
+  const productLinks = Array.from(
+    document.querySelectorAll("a[href*='/vp/products/'], a[href*='/products/']"),
+  );
+  for (const link of productLinks) {
+    const href = link.href || link.getAttribute("href") || "";
+    const linkText = normalize(
+      link.innerText ||
+        link.textContent ||
+        link.getAttribute("aria-label") ||
+        link.getAttribute("title"),
+    );
+    const idMatched =
+      (identity.vendorItemId && href.includes(identity.vendorItemId)) ||
+      (identity.itemId && href.includes(identity.itemId)) ||
+      (identity.productId &&
+        new RegExp(`/products/${identity.productId}(?:[/?#]|$)`).test(href));
+    const nameMatched =
+      namePrefix.length >= 6 &&
+      linkText.length >= 6 &&
+      (linkText.includes(namePrefix) || namePrefix.includes(linkText));
+    if (idMatched || nameMatched) {
+      return {
+        confirmed: true,
+        matchType: idMatched ? "product-link-id" : "product-link-name",
+      };
+    }
+  }
+  for (const root of roots) {
+    const html = root.innerHTML || "";
+    const text = normalize(root.innerText || root.textContent);
+    const idMatched =
+      (identity.vendorItemId && html.includes(identity.vendorItemId)) ||
+      (identity.itemId && html.includes(identity.itemId)) ||
+      (identity.productId && html.includes(`/products/${identity.productId}`));
+    const nameMatched =
+      namePrefix.length >= 6 &&
+      text.length >= 6 &&
+      (text.includes(namePrefix) || namePrefix.includes(text.slice(0, namePrefix.length)));
+    if (idMatched || nameMatched) {
+      return {
+        confirmed: true,
+        matchType: idMatched ? "product-id" : "product-name",
+      };
+    }
+  }
+  const bodyText = document.body?.innerText || "";
+  return {
+    confirmed: false,
+    loginRequired: /로그인|이메일|휴대폰번호/.test(bodyText) && /비밀번호/.test(bodyText),
+    emptyCart: /장바구니에\s*담긴\s*상품이\s*없|장바구니가\s*비어/.test(bodyText),
+    pageTitle: document.title,
+    pageUrl: location.href,
+    productLinkCount: productLinks.length,
+    cartRootCount: roots.length,
+  };
 }
 
 // 페이지 컨텍스트에서 실행: 상품 수량을 target 으로 맞춘다(async).
@@ -126,6 +330,25 @@ function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function randomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function productIdentityKey(urlValue) {
+  try {
+    const url = new URL(urlValue);
+    const productId = url.pathname.match(/\/vp\/products\/(\d+)/)?.[1] || "";
+    const itemId = url.searchParams.get("itemId") || "";
+    const vendorItemId = url.searchParams.get("vendorItemId") || "";
+    if (vendorItemId) return `vendor:${vendorItemId}`;
+    if (productId && itemId) return `product:${productId}:item:${itemId}`;
+    if (productId) return `product:${productId}`;
+    return url.toString();
+  } catch (e) {
+    return String(urlValue || "");
+  }
+}
+
 // 페이지 컨텍스트에서 실행: 쿠팡 검색 결과 카드에서 상품 정보를 추출한다.
 // 쿠팡 DOM 변경에 대비해 data-product-id와 상품 링크를 함께 사용한다.
 function extractSearchCandidatesInPage(limit) {
@@ -136,8 +359,23 @@ function extractSearchCandidatesInPage(limit) {
       return "";
     }
   };
+  const cleanProductUrl = (href) => {
+    try {
+      const source = new URL(href, location.origin);
+      const clean = new URL(source.pathname, source.origin);
+      for (const key of ["itemId", "vendorItemId"]) {
+        const value = source.searchParams.get(key);
+        if (value) clean.searchParams.set(key, value);
+      }
+      return clean.toString();
+    } catch (e) {
+      return "";
+    }
+  };
   const parsePrice = (text) => {
-    const digits = String(text || "").replace(/[^\d]/g, "");
+    const source = String(text || "");
+    const matched = source.match(/([\d,]{2,})\s*원/) || source.match(/[\d,]{2,}/);
+    const digits = String(matched?.[1] || matched?.[0] || "").replace(/[^\d]/g, "");
     const value = Number(digits);
     return Number.isFinite(value) && value > 0 ? value : null;
   };
@@ -201,8 +439,9 @@ function extractSearchCandidatesInPage(limit) {
   const order = [];
   for (const link of anchors) {
     const href = link.getAttribute("href") || "";
-    const url = absoluteUrl(href);
-    const pid = productId(url);
+    const absolute = absoluteUrl(href);
+    const url = cleanProductUrl(href);
+    const pid = productId(absolute);
     if (!url || !pid) continue;
     const opt = optionId(href);
     // 옵션 카드가 존재하는 상품은 '옵션 앵커'만 사용(이름↔옵션 일치 보장).
@@ -216,19 +455,18 @@ function extractSearchCandidatesInPage(limit) {
       link.parentElement ||
       link;
 
-    let name = (link.innerText || link.textContent || "").trim();
-    if (!name) name = (link.getAttribute("title") || "").trim();
+    let name = firstText(root, [
+      ".name",
+      ".search-product-name",
+      "[class*='productName']",
+      "[class*='ProductUnit_productName']",
+    ]);
+    if (!name) name = (link.getAttribute("title") || link.getAttribute("aria-label") || "").trim();
     if (!name) {
       const img = root.querySelector("img");
       name = img ? (img.getAttribute("alt") || "").trim() : "";
     }
-    if (!name)
-      name = firstText(root, [
-        ".name",
-        ".search-product-name",
-        "[class*='productName']",
-        "[class*='ProductUnit']",
-      ]);
+    if (!name) name = (link.innerText || link.textContent || "").trim().split("\n")[0];
     if (!name) name = (root.innerText || root.textContent || "").trim().slice(0, 80);
     if (!name) continue;
 
@@ -262,10 +500,12 @@ function extractSearchCandidatesInPage(limit) {
       "[class*='Delivery']",
     ]);
 
+    if (!price) continue;
+
     byKey.set(key, {
       name,
-      price: price || 0,
-      url, // 옵션 앵커의 href(vendorItemId 포함) → 담기 시 이 옵션 그대로.
+      price,
+      url, // 상품 경로와 itemId/vendorItemId만 유지해 선택 옵션으로 바로 이동.
       isAd,
       isRocket,
       isRocketFresh,
@@ -276,12 +516,12 @@ function extractSearchCandidatesInPage(limit) {
     order.push(key);
   }
   const candidates = order.map((key) => byKey.get(key));
+  const bodyText = document.body?.innerText || document.body?.textContent || "";
   return {
     candidates,
     pageTitle: document.title,
-    blocked: /접근이 제한|자동화된 접근|captcha|로봇이 아닙니다/i.test(
-      document.body?.innerText || "",
-    ),
+    blocked: /접근이 제한|자동화된 접근|captcha|로봇이 아닙니다|RET9999|시스템 오류 발생/i.test(bodyText),
+    productLinkCount: anchors.length,
   };
 }
 
@@ -294,43 +534,83 @@ function normalizeSearchText(value) {
 //  - speed → 로켓 상품 먼저, 그 안에서 최저가
 //  - freshness → 로켓프레시 먼저, 그다음 로켓, 그 안에서 최저가
 // 단, 항상 (1) 재료명 관련성, (2) 광고 여부를 앞 기준으로 둔다(엉뚱/광고 상품 방지).
-function rankSearchCandidates(ingredient, candidates, preference, neededG) {
+function rankSearchCandidates(ingredient, candidates, preference) {
   const needle = normalizeSearchText(ingredient);
+  const SEARCH_ALIASES = {
+    계란: ["달걀", "대란", "특란", "왕란", "중란"],
+    달걀: ["계란", "대란", "특란", "왕란", "중란"],
+  };
+  const searchTerms = Array.from(
+    new Set([needle, ...(SEARCH_ALIASES[needle] || [])].filter(Boolean)),
+  );
   const tokens = String(ingredient || "")
     .split(/\s+/)
     .filter(Boolean)
     .map(normalizeSearchText);
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const boundaryRe = needle ? new RegExp(esc(needle) + "(?![가-힣])") : null;
+  const boundaryRes = searchTerms.map(
+    (term) => new RegExp(esc(term) + "(?![가-힣])"),
+  );
   // 가공형 접미사 — 재료명에 없을 때만 강등(예: 생강 vs 생강차/생강즙. 단 고춧'가루'는 재료명에 있어 제외).
   const PROCESSED = [
     "차", "청", "즙", "환", "진액", "엑기스", "농축", "정과", "절임", "장아찌",
     "캔디", "사탕", "시럽", "페이스트", "티백", "음료", "스틱", "식초", "분말", "가루",
+    "김치", "양념", "허브", "시즈닝", "레몬머틀", "와사비",
+    "트러플", "갈릭", "버터",
   ];
-  const isProcessed = (hay) =>
-    PROCESSED.some((w) => hay.includes(w) && !needle.includes(w));
+  const EGG_PROCESSED = [
+    "구운계란", "구운달걀", "훈제계란", "훈제달걀", "훈제란",
+    "반숙란", "반숙계란", "반숙달걀", "계란과자", "달걀과자",
+  ];
+  const isProcessed = (hay) => {
+    if (
+      (needle === "계란" || needle === "달걀") &&
+      EGG_PROCESSED.some((word) => hay.includes(word))
+    ) {
+      return true;
+    }
+    return searchTerms.some((term) =>
+      PROCESSED.some(
+        (word) =>
+          !needle.includes(word) &&
+          (hay.includes(`${term}${word}`) || hay.includes(`${word}${term}`)),
+      ),
+    );
+  };
   const relevance = (name) => {
     const hay = normalizeSearchText(name);
     let base;
-    if (needle && hay.includes(needle)) {
+    const exactTermIndex = searchTerms.findIndex((term) => hay.includes(term));
+    if (exactTermIndex >= 0) {
       // 재료명 뒤에 한글이 또 붙으면(생강'차') 약하게, 단어 경계로 끝나면(흙생강) 강하게.
-      base = boundaryRe && boundaryRe.test(hay) ? 3 : 2;
+      base = boundaryRes[exactTermIndex].test(hay) ? 3 : 2;
     } else {
       // bigram 겹침 — 어순/접미사 차이("마늘다진것"↔"다진마늘") 대응.
       let hits = 0;
       for (let i = 0; needle && i + 2 <= needle.length; i++) {
         if (hay.includes(needle.slice(i, i + 2))) hits++;
       }
-      base = hits >= 2 ? 2 : hits === 1 || tokens.some((t) => t && hay.includes(t)) ? 1 : 0;
+      const requiredHits = Math.min(
+        3,
+        Math.max(1, Math.ceil(Math.max(0, needle.length - 1) * 0.5)),
+      );
+      const tokenHits = tokens.filter((t) => t.length >= 2 && hay.includes(t)).length;
+      base =
+        hits >= requiredHits
+          ? 2
+          : tokens.length > 1 && tokenHits > 0
+            ? 1
+            : 0;
     }
-    if (base > 0 && isProcessed(hay)) base = Math.max(0, base - 2); // 가공형 강등
+    if (base > 0 && isProcessed(hay)) base = 0;
     return base;
   };
   // 쿠팡이 이미 '낮은 가격순(salePriceAsc)'으로 정렬해 주므로 우리는 재정렬하지 않는다.
   //  (1) 관련 있는 것만(가공품/광고/무관 제거) (2) 빠른배송이면 로켓만 (3) 쿠팡 순서(=최저가) 유지.
-  let list = candidates.map((c, i) => ({ ...c, score: relevance(c.name), _i: i }));
-  const relevant = list.filter((c) => c.score > 0 && !c.isAd);
-  if (relevant.length) list = relevant; // 관련 상품이 하나도 없으면 폴백으로 전체 유지
+  let list = candidates
+    .map((c, i) => ({ ...c, score: relevance(c.name), _i: i }))
+    .filter((c) => c.score > 0 && !c.isAd && c.price > 0);
+  if (list.length === 0) return [];
   if (preference === "speed") {
     const rocket = list.filter((c) => c.isRocket);
     if (rocket.length) list = rocket; // 로켓 없으면 폴백
@@ -342,7 +622,57 @@ function rankSearchCandidates(ingredient, candidates, preference, neededG) {
   return list.sort((a, b) => b.score - a.score || a._i - b._i);
 }
 
-async function searchOneIngredient(item) {
+async function tabExists(tabId) {
+  if (!tabId) return false;
+  try {
+    await chrome.tabs.get(tabId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function closeTabQuietly(tabId) {
+  if (!tabId) return;
+  try {
+    if (await tabExists(tabId)) await chrome.tabs.remove(tabId);
+  } catch (e) {}
+}
+
+async function openOrReuseSearchTab(tabId, searchUrl) {
+  if (await tabExists(tabId)) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const tab = await chrome.tabs.update(tabId, { url: searchUrl, active: false });
+        return tab.id;
+      } catch (e) {
+        const message = String(e?.message || e);
+        if (!/Tabs cannot be edited right now/i.test(message)) throw e;
+        await delay(500 + attempt * 500);
+      }
+    }
+    await closeTabQuietly(tabId);
+  }
+  const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+  return tab.id;
+}
+
+async function extractCandidatesWithRetry(tabId) {
+  let result = null;
+  for (let attempt = 0; attempt < SEARCH_RENDER_ATTEMPTS; attempt++) {
+    if (attempt > 0) await delay(SEARCH_RENDER_GAP_MS);
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractSearchCandidatesInPage,
+      args: [SEARCH_RESULT_LIMIT],
+    });
+    result = injected && injected[0] && injected[0].result;
+    if (result?.blocked || result?.candidates?.length > 0) break;
+  }
+  return result;
+}
+
+async function searchOneIngredient(item, reusableTabId) {
   const ingredient = item.ingredient;
   const neededG = Number(item.neededG) || null;
   // 필요 g 가 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
@@ -359,103 +689,129 @@ async function searchOneIngredient(item) {
     params.set("rocketAll", "true");
   }
   const searchUrl = `https://www.coupang.com/np/search?${params.toString()}`;
-  let tab;
-  try {
-    tab = await chrome.tabs.create({ url: searchUrl, active: false });
-    await waitForTabComplete(tab.id);
-    await delay(1500); // 검색 결과 비동기 렌더 여유.
-    const injected = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractSearchCandidatesInPage,
-      args: [SEARCH_RESULT_LIMIT],
-    });
-    const result = injected && injected[0] && injected[0].result;
-    const candidates = rankSearchCandidates(
-      ingredient,
-      result?.candidates || [],
-      item.preference,
-      neededG,
-    );
-    const selected = candidates[0] || null;
+  let tabId = reusableTabId;
+  let lastError = null;
 
-    // 필요량(그램 가정) vs 상품 용량 → 담을 개수/방식 산정.
-    let addMode = "direct";
-    let quantity = 1;
-    let qtyNote = "";
-    if (selected && neededG && selected.amountG) {
-      if (selected.amountG >= neededG) {
-        addMode = "direct";
-        quantity = 1;
-        qtyNote = ` (필요 ${neededG}g ≤ 상품 ${selected.amountG}g → 1개)`;
-      } else {
-        addMode = "adjust";
-        quantity = Math.max(1, Math.ceil(neededG / selected.amountG));
-        qtyNote = ` (필요 ${neededG}g / 상품 ${selected.amountG}g → ${quantity}개)`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      tabId = await openOrReuseSearchTab(tabId, searchUrl);
+      await waitForTabComplete(tabId);
+      const result = await extractCandidatesWithRetry(tabId);
+      const candidates = rankSearchCandidates(
+        ingredient,
+        result?.candidates || [],
+        item.preference,
+      );
+      const selected = candidates[0] || null;
+
+      let addMode = "direct";
+      let quantity = 1;
+      let qtyNote = "";
+      if (selected && neededG && selected.amountG) {
+        if (selected.amountG >= neededG) {
+          qtyNote = ` (필요 ${neededG}g ≤ 상품 ${selected.amountG}g → 1개)`;
+        } else {
+          addMode = "adjust";
+          quantity = Math.max(1, Math.ceil(neededG / selected.amountG));
+          qtyNote = ` (필요 ${neededG}g / 상품 ${selected.amountG}g → ${quantity}개)`;
+        }
+      } else if (selected && neededG && !selected.amountG) {
+        qtyNote = " (상품 용량 미확인 → 1개)";
       }
-    } else if (selected && neededG && !selected.amountG) {
-      qtyNote = " (상품 용량 미확인 → 1개)";
-    }
 
-    return {
-      ingredient,
-      status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
-      searchUrl,
-      selected,
-      candidates,
-      addMode,
-      quantity,
-      message: selected
-        ? `상품을 선택했습니다.${qtyNote}`
-        : result?.blocked
-          ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
-          : "검색 결과에서 상품 정보를 찾지 못했습니다.",
-    };
-  } catch (e) {
-    return {
+      return {
+        tabId,
+        result: {
+          ingredient,
+          status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
+          searchUrl,
+          selected,
+          candidates,
+          addMode,
+          quantity,
+          message: selected
+            ? `상품을 선택했습니다.${qtyNote}`
+            : result?.blocked
+              ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
+              : `상품 링크 ${result?.productLinkCount || 0}개를 확인했지만 안전하게 확정할 관련 상품이 없습니다.`,
+        },
+      };
+    } catch (e) {
+      lastError = e;
+      const message = String(e?.message || e);
+      if (!/No tab with id|Tabs cannot be edited right now/i.test(message) || attempt > 0) {
+        break;
+      }
+      tabId = null;
+      await delay(1000);
+    }
+  }
+
+  return {
+    tabId,
+    result: {
       ingredient,
       status: "failed",
       searchUrl,
       selected: null,
       candidates: [],
-      message: "상품 검색에 실패했습니다: " + (e && e.message ? e.message : e),
-    };
-  } finally {
-    if (tab?.id) {
-      try {
-        await chrome.tabs.remove(tab.id);
-      } catch (e) {}
-    }
-  }
+      message: "상품 검색에 실패했습니다: " +
+        (lastError && lastError.message ? lastError.message : lastError),
+    },
+  };
 }
 
 async function searchProducts(items, senderTabId, reqId) {
-  const results = new Array(items.length);
-  let next = 0;
+  const results = [];
   let done = 0;
-  async function worker() {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) return;
+  let searchTabId = null;
+
+  try {
+    for (let i = 0; i < items.length; i++) {
+      if (i > 0) {
+        await delay(
+          i % SEARCH_BATCH_SIZE === 0
+            ? SEARCH_BATCH_COOLDOWN_MS
+            : randomDelay(SEARCH_MIN_GAP_MS, SEARCH_MAX_GAP_MS),
+        );
+      }
       sendProgress(senderTabId, reqId, {
         phase: "search-start",
         index: i,
         total: items.length,
         itemName: items[i].ingredient,
       }, "FRIDGEMATE_SEARCH_PROGRESS");
-      results[i] = await searchOneIngredient(items[i]);
+      const searched = await searchOneIngredient(items[i], searchTabId);
+      searchTabId = searched.tabId;
+      const result = searched.result;
+      results.push(result);
       done++;
       sendProgress(senderTabId, reqId, {
         phase: "search-done",
         index: i,
         total: items.length,
         done,
-        result: results[i],
+        result,
       }, "FRIDGEMATE_SEARCH_PROGRESS");
+
+      if (result.status === "blocked") {
+        for (let j = i + 1; j < items.length; j++) {
+          results.push({
+            ingredient: items[j].ingredient,
+            status: "blocked",
+            searchUrl: `https://www.coupang.com/np/search?q=${encodeURIComponent(items[j].ingredient)}`,
+            selected: null,
+            candidates: [],
+            message: "접근 제한을 감지해 남은 자동 검색을 중단했습니다.",
+          });
+        }
+        break;
+      }
     }
+  } finally {
+    await closeTabQuietly(searchTabId);
   }
-  const workers = [];
-  for (let i = 0; i < Math.min(SEARCH_CONCURRENCY, items.length); i++) workers.push(worker());
-  await Promise.all(workers);
+
   chrome.tabs.sendMessage(senderTabId, {
     type: "FRIDGEMATE_SEARCH_RESULT",
     reqId,
@@ -480,6 +836,7 @@ function waitForTabComplete(tabId, timeout = NAV_TIMEOUT_MS) {
 
 // 버튼이 나타나는 즉시 클릭(고정 대기 없이 빠르게).
 async function clickWithRetry(tabId) {
+  let lastResult = null;
   for (let i = 0; i < CLICK_ATTEMPTS; i++) {
     try {
       const injected = await chrome.scripting.executeScript({
@@ -487,13 +844,82 @@ async function clickWithRetry(tabId) {
         func: clickAddToCartInPage,
       });
       const r = injected && injected[0] && injected[0].result;
-      if (r && r.status === "success") return { ok: true };
+      lastResult = r || lastResult;
+      if (r && r.status === "clicked") {
+        return {
+          ok: true,
+          beforeCartCount: r.beforeCartCount,
+          buttonText: r.buttonText,
+        };
+      }
+      if (r?.status === "disabled") {
+        return {
+          ok: false,
+          reason: "disabled",
+          detail: r.buttonText || "",
+        };
+      }
     } catch (e) {
       // 페이지가 아직 로딩 중일 수 있음 → 재시도
     }
     await delay(CLICK_GAP_MS);
   }
-  return { ok: false };
+  return {
+    ok: false,
+    reason: lastResult?.status || "notfound",
+    detail:
+      lastResult?.buttonTexts?.join(" / ") ||
+      lastResult?.buttonText ||
+      lastResult?.pageTitle ||
+      "",
+  };
+}
+
+async function waitForCartConfirmation(tabId, beforeCartCount) {
+  const started = Date.now();
+  while (Date.now() - started < CART_CONFIRM_TIMEOUT_MS) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: verifyCartAddInPage,
+        args: [beforeCartCount],
+      });
+      const result = injected && injected[0] && injected[0].result;
+      if (result?.confirmed) return { confirmed: true, via: "product-page" };
+      if (result?.errorText) return { confirmed: false, reason: "product-error" };
+    } catch (e) {}
+    await delay(CART_CONFIRM_GAP_MS);
+  }
+  return { confirmed: false, reason: "unconfirmed" };
+}
+
+async function verifyProductInCart(tabId, productUrl, productName) {
+  await delay(CART_NAV_SETTLE_MS);
+  await chrome.tabs.update(tabId, { url: CART_PAGE_URL, active: false });
+  await waitForTabComplete(tabId);
+  let lastResult = null;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    if (attempt > 0) await delay(500);
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: verifyProductInCartPage,
+        args: [productUrl, productName || ""],
+      });
+      const result = injected && injected[0] && injected[0].result;
+      lastResult = result || lastResult;
+      if (result?.confirmed) return { confirmed: true, via: "cart-page" };
+      if (result?.loginRequired) return { confirmed: false, reason: "login-required" };
+      if (result?.emptyCart) return { confirmed: false, reason: "empty-cart" };
+    } catch (e) {}
+  }
+  return {
+    confirmed: false,
+    reason: "cart-item-not-found",
+    detail: lastResult
+      ? `상품 링크 ${lastResult.productLinkCount ?? 0}개, 후보 영역 ${lastResult.cartRootCount ?? 0}개`
+      : "장바구니 화면을 읽지 못함",
+  };
 }
 
 // 수량이 렌더될 때까지 짧게 재시도하며 target 으로 맞춘다.
@@ -518,6 +944,7 @@ async function setQuantityWithRetry(tabId, target) {
 async function processItem(item) {
   const name = item.ingredient;
   const url = item.productUrl;
+  const productName = item.productName;
   const mode = item.addMode === "adjust" ? "adjust" : "direct";
   const qty = Math.max(1, Number(item.quantity) || 1);
   if (!url) {
@@ -540,33 +967,71 @@ async function processItem(item) {
       // 수량 변경 후 쿠팡이 로딩(옵션/가격 재계산)을 끝내야 담기에 새 수량이 반영된다.
       await delay(QTY_SETTLE_MS);
     }
-    const res = await clickWithRetry(tab.id);
-    if (res.ok) {
-      // 클릭 직후 바로 닫으면 담기 요청(비동기)이 취소될 수 있어, 잠시 대기 후 닫는다.
-      await delay(SETTLE_MS);
-      try {
-        await chrome.tabs.remove(tab.id); // 담았으면 탭 닫기
-      } catch (e) {}
+    const clicked = await clickWithRetry(tab.id);
+    if (clicked.ok) {
+      const pageSignal = await waitForCartConfirmation(
+        tab.id,
+        clicked.beforeCartCount,
+      );
+      if (pageSignal.reason === "product-error") {
+        return {
+          itemName: name,
+          productName,
+          productUrl: url,
+          status: "failed",
+          message: "상품 옵션·품절 안내가 표시되어 담지 못했습니다.",
+        };
+      }
+
+      // 상품 페이지의 토스트나 헤더 숫자는 오탐 가능성이 있다. 최종 성공은
+      // 장바구니 페이지에서 선택한 상품 ID를 직접 찾았을 때만 인정한다.
+      const verification = await verifyProductInCart(tab.id, url, productName);
+      if (!verification.confirmed) {
+        const reason =
+          verification.reason === "login-required"
+            ? "쿠팡 로그인이 필요합니다."
+            : verification.reason === "empty-cart"
+              ? "쿠팡 장바구니가 비어 있습니다. 담기 요청이 반영되지 않았습니다."
+              : `장바구니에서 선택 상품을 확인하지 못했습니다. (${verification.detail || "확인 정보 없음"})`;
+        return {
+          itemName: name,
+          productName,
+          productUrl: url,
+          status: "failed",
+          message: reason,
+        };
+      }
       return {
         itemName: name,
+        productName,
         productUrl: url,
         status: "success",
-        message: "장바구니 담기 완료." + qtyNote + " (결제는 진행하지 않음)",
+        message:
+          "장바구니 반영 확인 완료." +
+          qtyNote +
+          " (결제는 진행하지 않음)",
       };
     }
     return {
       itemName: name,
+      productName,
       productUrl: url,
       status: "failed",
-      message: "장바구니 버튼을 찾지 못했습니다. 로그인 또는 상품 옵션 선택이 필요할 수 있어요.",
+      message:
+        clicked.reason === "disabled"
+          ? `장바구니 버튼이 비활성 상태입니다. 상품 옵션 확인이 필요합니다.${clicked.detail ? ` (${clicked.detail})` : ""}`
+          : `장바구니 버튼을 찾지 못했습니다.${clicked.detail ? ` 페이지 버튼: ${clicked.detail}` : ""}`,
     };
   } catch (e) {
     return {
       itemName: name,
+      productName,
       productUrl: url,
       status: "failed",
       message: "상품 페이지 처리에 실패했습니다: " + (e && e.message ? e.message : e),
     };
+  } finally {
+    await closeTabQuietly(tab?.id);
   }
 }
 
@@ -583,35 +1048,49 @@ function sendProgress(senderTabId, reqId, payload, type = "FRIDGEMATE_EXEC_PROGR
 async function executeCart(items, senderTabId, reqId) {
   const total = items.length;
   const results = new Array(total);
-
-  // 동시 실행 상한(CONCURRENCY)을 둔 워커 풀: 항목을 병렬로 처리하되 한꺼번에 다 열지는 않는다.
-  let next = 0;
+  const claimedProducts = new Map();
   let done = 0;
-  async function worker() {
-    while (true) {
-      const i = next++;
-      if (i >= total) return;
-      sendProgress(senderTabId, reqId, {
-        phase: "item-start",
-        index: i,
-        total,
-        itemName: items[i].ingredient,
-      });
-      const r = await processItem(items[i]);
-      results[i] = r;
-      done++;
-      sendProgress(senderTabId, reqId, {
-        phase: "item-done",
-        index: i,
-        total,
-        done,
-        result: r,
-      });
+
+  for (let i = 0; i < total; i++) {
+    if (i > 0) {
+      await delay(randomDelay(CART_ITEM_MIN_GAP_MS, CART_ITEM_MAX_GAP_MS));
     }
+    sendProgress(senderTabId, reqId, {
+      phase: "item-start",
+      index: i,
+      total,
+      itemName: items[i].ingredient,
+    });
+    const item = items[i];
+    const identity = item.productUrl ? productIdentityKey(item.productUrl) : "";
+    const claimedBy = identity ? claimedProducts.get(identity) : null;
+    let result;
+    if (claimedBy && claimedBy !== item.ingredient) {
+      result = {
+        itemName: item.ingredient,
+        productName: item.productName,
+        productUrl: item.productUrl,
+        status: "failed",
+        message:
+          `"${claimedBy}"와 동일한 쿠팡 상품이 선택되어 중복 담기를 중단했습니다. ` +
+          "검색 결과에서 다른 상품을 선택해야 합니다.",
+      };
+    } else {
+      result = await processItem(item);
+      if (identity && result.status === "success") {
+        claimedProducts.set(identity, item.ingredient);
+      }
+    }
+    results[i] = result;
+    done++;
+    sendProgress(senderTabId, reqId, {
+      phase: "item-done",
+      index: i,
+      total,
+      done,
+      result,
+    });
   }
-  const workers = [];
-  for (let k = 0; k < Math.min(CONCURRENCY, total); k++) workers.push(worker());
-  await Promise.all(workers);
 
   const success = results.filter((r) => r.status === "success").length;
   const failed = results.filter((r) => r.status === "failed").length;

@@ -57,6 +57,7 @@ export function CartExecutionCard({
     current?: string;
   } | null>(null);
   const [extReady, setExtReady] = useState(false);
+  const [extVersion, setExtVersion] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -65,7 +66,10 @@ export function CartExecutionCard({
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    const off = onExtensionReady(() => setExtReady(true));
+    const off = onExtensionReady((version) => {
+      setExtReady(true);
+      setExtVersion(version || "unknown");
+    });
     pingExtension();
     const t = setInterval(pingExtension, 2000);
     return () => {
@@ -133,8 +137,7 @@ export function CartExecutionCard({
       return {
         ingredient: item.name,
         productUrl: item.productUrl || r?.selected?.url,
-        searchUrl:
-          item.productUrl || r?.selected ? undefined : searchUrl,
+        productName: r?.selected?.name,
         // 검색에서 산정한 담을 개수/방식(필요량 vs 상품 용량). 없으면 1개 direct.
         quantity: r?.quantity ?? 1,
         addMode: r?.addMode ?? "direct",
@@ -219,8 +222,7 @@ export function CartExecutionCard({
     onStatusChange?.("running");
     try {
       const res = await executeViaExtension(items, (p: ExecProgress) => {
-        // 병렬 처리이므로 완료 수(done)는 item-done 기준으로만 증가시키고,
-        // 진행 중 표시 이름은 item-start 에서 갱신한다(막대가 뒤로 가지 않도록).
+        // 완료 수는 item-done에서 증가시키고 진행 중 품목은 item-start에서 갱신한다.
         setProgress((prev) => {
           const base = prev ?? { done: 0, total: p.total };
           if (p.phase === "item-start") {
@@ -281,7 +283,9 @@ export function CartExecutionCard({
               : "bg-white/10 text-white/55",
           ].join(" ")}
         >
-          {extReady ? "확장 연결됨" : "확장 미연결"}
+          {extReady
+            ? `확장 연결됨 v${extVersion ?? "확인 중"}`
+            : "확장 미연결"}
         </span>
       </div>
 
@@ -588,7 +592,7 @@ export function CartExecutionCard({
             <p className="mb-2 text-sm text-white/70">{exec.message}</p>
             <ul className="space-y-1.5 text-xs">
               {exec.results.map((r, i) => (
-                <li key={i} className="flex items-center gap-2">
+                <li key={i} className="flex items-start gap-2">
                   <span
                     className={[
                       "rounded px-1.5 py-0.5 text-[10px] font-semibold",
@@ -602,7 +606,10 @@ export function CartExecutionCard({
                     {r.status}
                   </span>
                   <span className="font-medium">{r.itemName}</span>
-                  <span className="text-white/50">— {r.message}</span>
+                  <span className="min-w-0 text-white/50">
+                    {r.productName ? `→ ${r.productName} · ` : "— "}
+                    {r.message}
+                  </span>
                 </li>
               ))}
             </ul>
