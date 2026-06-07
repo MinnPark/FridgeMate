@@ -48,37 +48,54 @@ interface BackendMeal {
   name: string;
   reason?: string;
 }
-interface BackendLog {
-  node?: string;
-  event?: string;
-  result?: Record<string, unknown>;
-  [k: string]: unknown;
+
+// 새 meal_agent 출력 형식 (entries 기반)
+interface BackendMealEntry {
+  slot: string;           // 이미 한국어: "아침" | "점심" | "저녁"
+  recipeTitle: string;
+  usesPriorityItem?: boolean;
 }
-interface BackendPantryAnalysisItem {
-  name: string;
-  category?: string;
-  freshness?: FreshnessLevel;
-  amount?: string | null;
-  expiry_label?: string | null;
-  note?: string | null;
-}
+
+// ── 상태 정의: 백엔드 응답(LangGraph state) 모양 (snake_case) ─────────────────
 export interface ChatState {
   user_input?: string;
   budget_limit?: number | null;
   pantry_items?: BackendPantryItem[];
-  // 새 Pantry Agent가 UI용으로 생성하는 분석 결과 (backend/app/tools/pantry_tools.build_pantry_analysis)
   pantry_analysis?: {
     items?: BackendPantryAnalysisItem[];
     priority_use?: string[];
     summary?: string;
   };
+
+  // 새 meal_agent 출력 형식 (label/entries/note 기반)
   meal_plan?: {
+    note?: string;                          // "임박 재료를 앞쪽 일자에 배치했어요."
+    days?: {
+      label?: string;                       // "1일차" | "2일차" | "3일차"
+      entries?: BackendMealEntry[];         // 새 형식
+      // ── 구 형식 fallback (이전 meal_agent 호환) ──
+      day?: string;                         // "mon" | "tue" | ...
+      meals?: BackendMeal[];
+    }[];
+    // 구 형식 fallback
     strategy?: string;
-    days?: { day?: string; meals?: BackendMeal[] }[];
     pantry_used_first?: string[];
   };
+
   selected_recipes?: BackendRecipe[];
   recipe_search_trace?: { strategy?: string; original_query?: string };
+
+  // 새 nutrition_tools.py 출력 형식
+  nutrition_result?: {
+    protein?:  { current?: number; target?: number; unit?: string };
+    calories?: { current?: number; target?: number; unit?: string };
+    carbs?:    { current?: number; target?: number; unit?: string };
+    fat?:      { current?: number; target?: number; unit?: string };
+    passed?:   boolean;
+    message?:  string;
+    warnings?: string[];
+  };
+
   missing_ingredients?: { name: string; amount?: number; unit?: string }[];
   cart_items?: {
     ingredient: string;
@@ -203,41 +220,89 @@ export function mapChatToRunResponse(
       ],
     }));
 
-  // 식단
-  const mealDays = (state.meal_plan?.days ?? []).map((d) => ({
-    label: DAY_KO[d.day ?? ""] ?? d.day ?? "—",
-    entries: (d.meals ?? []).map((m) => ({
-      slot: SLOT_KO[m.slot] ?? m.slot,
-      recipeTitle: m.name,
-      usesPriorityItem: priorityUse.some((n) => m.name.includes(n)),
-    })),
-  }));
+  // ── 식단 ────────────────────────────────────────────────────────────────────
+  // 새 형식(label/entries) 우선, 구 형식(day/meals) fallback
+  const mealDays = (state.meal_plan?.days ?? []).map((d) => {
+    const isNewFormat = Boolean(d.label || d.entries);
 
-  // 영양: logs 의 nutrition_verified 결과에서 추출
-  const nc = (state.logs ?? []).find((l) => l.event === "nutrition_verified")
-    ?.result as
-    | { total?: { calories?: number; protein?: number }; goal?: { protein_min?: number }; passed?: boolean }
-    | undefined;
+    if (isNewFormat) {
+      // 새 meal_agent 형식: label/entries/recipeTitle/usesPriorityItem
+      return {
+        label: d.label ?? "—",
+        entries: (d.entries ?? []).map((e) => ({
+          slot: e.slot,                          // 이미 한국어 ("아침"/"점심"/"저녁")
+          recipeTitle: e.recipeTitle,
+          usesPriorityItem: e.usesPriorityItem ?? false,  // 백엔드 값 직접 사용
+        })),
+      };
+    }
 
-  const proteinCur = nc?.total?.protein ?? 0;
-  const proteinTgt = nc?.goal?.protein_min ?? req.proteinTargetGram ?? 0;
-  const passed = nc?.passed ?? false;
-  const nutrition: NutritionVerification = {
-    protein: { current: proteinCur, target: proteinTgt, unit: "g" },
-    calories: {
-      current: nc?.total?.calories ?? 0,
-      target: req.calorieTargetKcal ?? 0, // 백엔드 미제공 → 사용자 목표값(없으면 0)
-      unit: "kcal",
-    },
-    // carbs/fat 는 백엔드 검증 결과에 없음 → 미제공
-    passed,
-    message: passed
-      ? "단백질 목표를 충족했어요. (백엔드 영양 검증 결과)"
-      : "단백질 목표에 미달했어요. 보완이 필요합니다. (백엔드 영양 검증 결과)",
-    notProvided: ["탄수화물", "지방", req.calorieTargetKcal ? "" : "칼로리 목표"].filter(
-      Boolean,
-    ) as string[],
-  };
+    // 구 meal_agent 형식 fallback: day/meals/name
+    return {
+      label: DAY_KO[d.day ?? ""] ?? d.day ?? "—",
+      entries: (d.meals ?? []).map((m) => ({
+        slot: SLOT_KO[m.slot] ?? m.slot,
+        recipeTitle: m.name,
+        usesPriorityItem: priorityUse.some((n) => m.name.includes(n)),
+      })),
+    };
+  });
+
+  // ── 영양 ────────────────────────────────────────────────────────────────────
+  // state.nutrition_result 우선 (새 nutrition_tools.py 형식)
+  // fallback: logs의 nutrition_verified 결과 (구 형식)
+  const nr = state.nutrition_result;
+
+  const nutrition: NutritionVerification = nr
+    ? {
+        // 새 형식: nutrition_result 직접 매핑
+        protein: {
+          current: nr.protein?.current ?? 0,
+          target:  nr.protein?.target  ?? req.proteinTargetGram ?? 0,
+          unit:    nr.protein?.unit    ?? "g",
+        },
+        calories: {
+          current: nr.calories?.current ?? 0,
+          target:  nr.calories?.target  ?? req.calorieTargetKcal ?? 0,
+          unit:    nr.calories?.unit    ?? "kcal",
+        },
+        carbs: nr.carbs
+          ? { current: nr.carbs.current ?? 0, target: nr.carbs.target ?? 0, unit: "g" }
+          : undefined,
+        fat: nr.fat
+          ? { current: nr.fat.current ?? 0, target: nr.fat.target ?? 0, unit: "g" }
+          : undefined,
+        passed:   nr.passed  ?? false,
+        message:  nr.message ?? (nr.passed ? "영양 목표를 충족했어요." : "영양 목표에 미달했어요."),
+        warnings: nr.warnings ?? [],
+      }
+    : (() => {
+        // 구 형식 fallback: logs에서 nutrition_verified 결과 추출
+        const nc = (state.logs ?? []).find((l) => l.event === "nutrition_verified")
+          ?.result as
+          | { total?: { calories?: number; protein?: number }; goal?: { protein_min?: number }; passed?: boolean }
+          | undefined;
+
+        const passed = nc?.passed ?? false;
+        return {
+          protein: {
+            current: nc?.total?.protein ?? 0,
+            target:  nc?.goal?.protein_min ?? req.proteinTargetGram ?? 0,
+            unit:    "g",
+          },
+          calories: {
+            current: nc?.total?.calories ?? 0,
+            target:  req.calorieTargetKcal ?? 0,
+            unit:    "kcal",
+          },
+          passed,
+          message: passed
+            ? "단백질 목표를 충족했어요. (백엔드 영양 검증 결과)"
+            : "단백질 목표에 미달했어요. 보완이 필요합니다. (백엔드 영양 검증 결과)",
+          notProvided: ["탄수화물", "지방", req.calorieTargetKcal ? "" : "칼로리 목표"]
+            .filter(Boolean) as string[],
+        };
+      })();
 
   // 장보기 (cart_items 기반)
   const carts = state.cart_items ?? [];
@@ -317,9 +382,9 @@ export function mapChatToRunResponse(
     recipes,
     mealPlan: {
       days: mealDays,
-      note: state.meal_plan?.strategy
-        ? `전략: ${state.meal_plan.strategy}`
-        : undefined,
+      // 새 형식: meal_plan.note 우선, 구 형식: strategy fallback
+      note: state.meal_plan?.note
+        ?? (state.meal_plan?.strategy ? `전략: ${state.meal_plan.strategy}` : undefined),
     },
     nutrition,
     shopping: {

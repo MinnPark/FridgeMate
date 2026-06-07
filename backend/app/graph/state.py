@@ -14,7 +14,8 @@ class FridgeMateState(TypedDict, total=False):
     pantry_analysis: dict[str, Any]            # UI PantryCard용
 
     # 영양
-    nutrition_goal: dict[str, Any]
+    nutrition_goal: dict[str, Any]             # 입력: 목표값 (protein_target, calorie_target 등)
+    nutrition_result: dict[str, Any]           # 출력: 검증 결과 → chatAdapter.ts nutrition 필드 매핑
 
     # 레시피
     selected_recipes: list[dict[str, Any]]
