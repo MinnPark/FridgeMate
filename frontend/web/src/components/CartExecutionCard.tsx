@@ -54,6 +54,8 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
   const [resultOpen, setResultOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [searchResults, setSearchResults] = useState<CoupangProductSearchResult[]>([]);
+  // 구매할 재료 선택(체크박스). 기본 전체 해제(사용자가 직접 선택).
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const off = onExtensionReady(() => setExtReady(true));
@@ -65,6 +67,12 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
     };
   }, []);
 
+  // 분석 결과(품목 집합)가 바뀌면 선택을 초기화(전체 해제).
+  const itemKey = shopping.items.map((i) => i.name).join("|");
+  useEffect(() => {
+    setPicked(new Set());
+  }, [itemKey]);
+
   const hasItems = shopping.items.length > 0;
   const searchUrl = shopping.coupangSearchUrl;
   const selectedByIngredient = new Map(
@@ -72,29 +80,44 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       .filter((result) => result.selected)
       .map((result) => [result.ingredient, result.selected!]),
   );
-  const targetCount = shopping.items.filter(
+  // 체크된(구매할) 재료만 검색·담기 대상.
+  const pickedItems = shopping.items.filter((item) => picked.has(item.name));
+  const allPicked = hasItems && pickedItems.length === shopping.items.length;
+  function togglePick(name: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+  function toggleAllPick() {
+    setPicked(allPicked ? new Set() : new Set(shopping.items.map((i) => i.name)));
+  }
+
+  const targetCount = pickedItems.filter(
     (item) => item.productUrl || selectedByIngredient.has(item.name),
   ).length;
-  const searchedTotal = shopping.items.reduce(
+  // 선택한 품목이 모두 URL 확정(상품 URL 보유 또는 검색 선택됨)된 상태.
+  const allPickedResolved = pickedItems.length > 0 && targetCount === pickedItems.length;
+  const searchedTotal = pickedItems.reduce(
     (sum, item) =>
       sum + (selectedByIngredient.get(item.name)?.price ?? item.priceKrw),
     0,
   );
   const hasConfirmedPrices =
-    shopping.items.length > 0 &&
-    shopping.items.every(
+    pickedItems.length > 0 &&
+    pickedItems.every(
       (item) => item.priceKrw > 0 || selectedByIngredient.has(item.name),
     );
-  const displayedTotal = hasConfirmedPrices
-    ? searchedTotal
-    : shopping.estimatedCostKrw;
+  const displayedTotal = searchedTotal;
   const displayedWithinBudget =
     shopping.budgetKrw === undefined ||
     !hasConfirmedPrices ||
     searchedTotal <= shopping.budgetKrw;
 
   function buildExecItems(): CartExecuteItem[] {
-    return shopping.items.map((item) => ({
+    return pickedItems.map((item) => ({
       ingredient: item.name,
       productUrl: item.productUrl || selectedByIngredient.get(item.name)?.url,
       searchUrl:
@@ -120,7 +143,12 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       setPhase("result");
       return;
     }
-    const missing = shopping.items.filter((item) => !item.productUrl);
+    const missing = pickedItems.filter((item) => !item.productUrl);
+    if (pickedItems.length === 0) {
+      setExecError("구매할 재료를 1개 이상 선택해 주세요.");
+      setPhase("result");
+      return;
+    }
     if (missing.length === 0) {
       setPhase("ready");
       setConfirmOpen(true);
@@ -242,16 +270,36 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       <div className="grid gap-5 lg:grid-cols-2">
         {/* 좌: 부족 재료 요약 */}
         <div>
-          <p className="mb-2 text-xs font-semibold text-white/55">
+          <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/55">
+            <input
+              type="checkbox"
+              checked={allPicked}
+              onChange={toggleAllPick}
+              className="h-3.5 w-3.5 shrink-0 accent-lime-accent"
+              aria-label="전체 선택"
+            />
             부족 재료 {shopping.items.length}개
-          </p>
+            <span className="font-normal text-white/40">
+              · 선택 {pickedItems.length}개
+            </span>
+          </label>
           {hasItems ? (
             <ul className="space-y-1.5">
               {shopping.items.map((item, index) => (
                 <li
                   key={`${item.name}-${item.quantity}-${index}`}
-                  className="flex items-center gap-2 text-sm"
+                  className={[
+                    "flex items-center gap-2 text-sm",
+                    picked.has(item.name) ? "" : "opacity-40",
+                  ].join(" ")}
                 >
+                  <input
+                    type="checkbox"
+                    checked={picked.has(item.name)}
+                    onChange={() => togglePick(item.name)}
+                    className="h-3.5 w-3.5 shrink-0 accent-lime-accent"
+                    aria-label={`${item.name} 선택`}
+                  />
                   <span className="font-medium">{item.name}</span>
                   <span className="text-xs text-white/40">{item.quantity}</span>
                   <button
@@ -401,24 +449,29 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
           <button
             onClick={() => {
               if (phase === "running" || phase === "searching") return;
-              if (phase === "ready" || targetCount === shopping.items.length) {
+              if (phase === "ready" || allPickedResolved) {
                 setConfirmOpen(true);
               } else {
                 void runSearch();
               }
             }}
-            disabled={phase === "running" || phase === "searching" || !hasItems}
+            disabled={
+              phase === "running" ||
+              phase === "searching" ||
+              !hasItems ||
+              pickedItems.length === 0
+            }
             className="mt-2 w-full rounded-xl bg-gold py-2.5 text-sm font-bold text-ink-900 transition hover:brightness-105 disabled:opacity-60"
           >
             {phase === "searching"
               ? "상품 검색 중…"
               : phase === "running"
               ? "담는 중…"
-              : phase === "ready" || targetCount === shopping.items.length
-                ? "선택 상품 확인 및 장바구니 담기"
+              : phase === "ready" || allPickedResolved
+                ? `선택 ${pickedItems.length}개 장바구니 담기`
                 : phase === "result"
                 ? "🤖 다시 담기 (Chrome 확장)"
-                : "쿠팡 상품 자동 검색"}
+                : `선택 ${pickedItems.length}개 쿠팡 상품 검색`}
           </button>
 
           {phase === "result" && (exec || execError) && (
@@ -464,11 +517,11 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       >
         <ul className="space-y-1 text-sm text-white/80">
           <li>
-            담을 품목: <b>{shopping.items.length}개</b> (선택 완료{" "}
+            담을 품목: <b>{pickedItems.length}개</b> 선택 (URL 확정{" "}
             <b>{targetCount}개</b> 담기 시도)
           </li>
           <li className="text-white/60">
-            {shopping.items.map((i) => i.name).join(", ")}
+            {pickedItems.map((i) => i.name).join(", ")}
           </li>
           <li>
             검색 상품 총액:{" "}
