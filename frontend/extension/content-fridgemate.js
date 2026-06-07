@@ -24,6 +24,23 @@ window.addEventListener("message", (e) => {
   const d = e.data;
   if (d.type === "FRIDGEMATE_PING") {
     announce();
+  } else if (d.type === "FRIDGEMATE_SEARCH_PRODUCTS") {
+    if (!extensionAlive()) {
+      window.postMessage(
+        {
+          type: "FRIDGEMATE_SEARCH_RESULT",
+          reqId: d.reqId,
+          response: { results: [] },
+        },
+        "*"
+      );
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: "FRIDGEMATE_SEARCH_PRODUCTS",
+      items: d.items || [],
+      reqId: d.reqId,
+    });
   } else if (d.type === "FRIDGEMATE_EXEC_CART") {
     if (!extensionAlive()) {
       // 확장이 업데이트/새로고침되어 이 페이지의 스크립트가 끊긴 경우.
@@ -72,7 +89,10 @@ window.addEventListener("message", (e) => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (
     msg &&
-    (msg.type === "FRIDGEMATE_EXEC_RESULT" || msg.type === "FRIDGEMATE_EXEC_PROGRESS")
+    (msg.type === "FRIDGEMATE_EXEC_RESULT" ||
+      msg.type === "FRIDGEMATE_EXEC_PROGRESS" ||
+      msg.type === "FRIDGEMATE_SEARCH_RESULT" ||
+      msg.type === "FRIDGEMATE_SEARCH_PROGRESS")
   ) {
     window.postMessage(msg, "*"); // reqId 포함 그대로 전달
   }

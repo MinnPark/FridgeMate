@@ -19,22 +19,25 @@ FridgeMate AI 장보기 리스트를 **사용자의 실제 Chrome** 에서 쿠�
 
 1. 쿠팡에 평소 쓰는 Chrome 으로 **로그인**해 둡니다.
 2. FridgeMate(http://localhost:3000)에서 **자동 담기 실행 → 확인하고 실행**.
-3. 상품 URL 이 있는 품목이 백그라운드 탭으로 순차로 열리고 "장바구니 담기"가 눌립니다.
-4. 화면에 품목별 성공/실패/건너뜀 결과가 표시됩니다.
+3. 상품 URL이 없으면 쿠팡 검색 결과를 백그라운드 탭에서 읽어 후보 상품을 선택합니다.
+4. FridgeMate 화면에서 선택 상품과 가격을 확인합니다.
+5. 확인한 상품 페이지가 열리고 "장바구니 담기"가 눌립니다.
+6. 화면에 품목별 성공/실패/건너뜀 결과가 표시됩니다.
 
 ## 동작 방식
 
 ```
 FridgeMate 페이지 ──postMessage──▶ content-fridgemate.js ──▶ background.js
-                                                              │ (탭 생성 + executeScript)
+                                                              │ (검색/상품 탭 생성 + executeScript)
                                                               ▼
-                                                      쿠팡 상품 페이지에서
-                                                      '장바구니 담기' 클릭
+                                                 검색 후보 수집 → 사용자 확인
+                                                 → '장바구니 담기' 클릭
 ```
 
 ## 주의
 
 - 쿠팡 DOM 변경 시 버튼 selector 가 안 맞을 수 있습니다 (`background.js` 의
-  `clickAddToCartInPage` 에서 텍스트 기준으로 찾습니다).
+  `extractSearchCandidatesInPage`, `clickAddToCartInPage`에서 보완합니다).
+- 검색 결과 접근이 제한되거나 CAPTCHA가 나오면 자동 검색이 실패할 수 있습니다.
 - 상품 URL 이 없는 품목은 `skipped` 처리됩니다.
 - 결제/구매(`바로구매`, `구매하기`, `결제`, `주문`) 버튼은 클릭하지 않습니다.

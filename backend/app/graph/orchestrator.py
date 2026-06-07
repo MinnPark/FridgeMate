@@ -30,6 +30,10 @@ def supervisor_router(state: FridgeMateState) -> str:
     route = decision.get("route", fallback_route)
     if route not in {"meal", "recipe", "shopping"}:
         route = fallback_route
+    # Meal Agent는 Recipe Agent의 selected_recipes를 전제로 식단과 영양을 계산한다.
+    # 전체 분석의 첫 라우팅에서 meal을 선택하면 RAG가 건너뛰어져 영양값이 모두 0이 된다.
+    if route == "meal" and state.get("pantry_items") and not state.get("selected_recipes"):
+        route = "recipe"
 
     state["route"] = route
     state["logs"] = append_log(
@@ -46,19 +50,19 @@ def supervisor_router(state: FridgeMateState) -> str:
 
 
 def _fallback_route(state: FridgeMateState) -> str:
-    user_input = state.get("user_input", "")
     if state.get("meal_plan") and not state.get("cart_items"):
         return "shopping"
-    if "레시피" in user_input or "요리" in user_input:
-        return "recipe"
-    return "meal"
+    if state.get("selected_recipes"):
+        return "meal"
+    # 식단/레시피 분석 모두 먼저 RAG 검색이 필요하다.
+    return "recipe"
 
 
 def _fallback_next_steps(route: str) -> list[str]:
     if route == "meal":
-        return ["Meal Agent", "Recipe Agent", "Shopping Agent"]
+        return ["Meal Agent", "Shopping Agent"]
     if route == "recipe":
-        return ["Recipe Agent", "Shopping Agent"]
+        return ["Recipe Agent", "Meal Agent", "Shopping Agent"]
     return ["Shopping Agent"]
 
 
@@ -82,8 +86,8 @@ def build_graph():
         },
     )
 
+    graph.add_edge("recipe", "meal")
     graph.add_edge("meal", "shopping")
-    graph.add_edge("recipe", "shopping")
     graph.add_edge("shopping", END)
 
     return graph.compile()

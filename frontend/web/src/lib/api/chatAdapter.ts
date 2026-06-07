@@ -114,7 +114,12 @@ export interface ChatState {
     warnings?: string[];
   };
 
-  missing_ingredients?: { name: string; amount?: number; unit?: string }[];
+  missing_ingredients?: {
+    name: string;
+    amount?: number | null;
+    unit?: string | null;
+    needed_by?: string[];
+  }[];
   cart_items?: {
     ingredient: string;
     product_name?: string;
@@ -176,10 +181,51 @@ const DAY_KO: Record<string, string> = {
 };
 
 function coupangSearch(names: string[]): string {
-  return (
-    "https://www.coupang.com/np/search?q=" +
-    names.map((n) => encodeURIComponent(n)).join("%20")
-  );
+  const first = names.find((name) => name.trim());
+  return first
+    ? `https://www.coupang.com/np/search?q=${encodeURIComponent(first)}`
+    : "https://www.coupang.com/";
+}
+
+function formatMissingQuantity(
+  amount?: number | null,
+  unit?: string | null,
+): string {
+  if (amount === undefined || amount === null) return unit || "수량 확인 필요";
+  const value = Number.isInteger(amount) ? String(amount) : String(amount);
+  return `${value}${unit ?? ""}`;
+}
+
+function mapMissingToShoppingItems(
+  missing: NonNullable<ChatState["missing_ingredients"]>,
+): ShoppingItem[] {
+  const grouped = new Map<
+    string,
+    { quantities: string[]; neededBy: Set<string> }
+  >();
+
+  for (const item of missing) {
+    const name = item.name.trim();
+    if (!name) continue;
+    const current = grouped.get(name) ?? {
+      quantities: [],
+      neededBy: new Set<string>(),
+    };
+    const quantity = formatMissingQuantity(item.amount, item.unit);
+    if (!current.quantities.includes(quantity)) current.quantities.push(quantity);
+    for (const recipe of item.needed_by ?? []) current.neededBy.add(recipe);
+    grouped.set(name, current);
+  }
+
+  return Array.from(grouped, ([name, value]) => ({
+    name,
+    quantity: value.quantities.join(" + "),
+    priceKrw: 0,
+    reason:
+      value.neededBy.size > 0
+        ? `필요 식단: ${Array.from(value.neededBy).join(", ")}`
+        : "식단에 필요한 부족 재료",
+  }));
 }
 
 export function mapChatToRunResponse(
@@ -324,15 +370,21 @@ export function mapChatToRunResponse(
         };
       })();
 
-  // 장보기 (cart_items 기반)
+  // 장보기
+  // 새 Shopping Agent는 역할 분리에 따라 missing_ingredients만 계산한다.
+  // 구형 백엔드의 cart_items도 계속 호환하되, 새 계약을 우선 사용한다.
+  const missing = state.missing_ingredients ?? [];
   const carts = state.cart_items ?? [];
-  const shoppingItems: ShoppingItem[] = carts.map((c) => ({
-    name: c.ingredient,
-    quantity: c.quantity ?? "-",
-    priceKrw: c.price ?? 0,
-    reason: c.product_name,
-    // productUrl 미제공(백엔드는 검색 deeplink만) → 자동 담기 시 skip / score·delivery 미제공
-  }));
+  const shoppingItems: ShoppingItem[] =
+    missing.length > 0
+      ? mapMissingToShoppingItems(missing)
+      : carts.map((c) => ({
+          name: c.ingredient,
+          quantity: c.quantity ?? "-",
+          priceKrw: c.price ?? 0,
+          reason: c.product_name,
+          // 구형 백엔드는 검색 deeplink만 제공하므로 productUrl은 비운다.
+        }));
   const estimated = shoppingItems.reduce((s, i) => s + i.priceKrw, 0);
   const budget = state.budget_limit ?? req.budgetKrw ?? undefined;
   const withinBudget = budget !== undefined ? estimated <= budget : true;
@@ -373,8 +425,18 @@ export function mapChatToRunResponse(
       id: "shopping",
       order: 4,
       name: "Shopping Agent",
-      status: has(carts) ? "completed" : "pending",
-      message: has(carts) ? "부족 재료/장바구니 후보 생성 완료" : "부족 재료 계산 대기",
+      status:
+        state.logs?.some(
+          (log) => log.node === "shopping" && log.event === "missing_calculated",
+        ) || has(carts)
+          ? "completed"
+          : "pending",
+      message:
+        state.logs?.some(
+          (log) => log.node === "shopping" && log.event === "missing_calculated",
+        ) || has(carts)
+          ? `부족 재료 ${shoppingItems.length}개 계산 완료`
+          : "부족 재료 계산 대기",
       logs: logEvents("shopping"),
     },
     {
@@ -417,6 +479,6 @@ export function mapChatToRunResponse(
     pipeline,
     warnings,
     notice:
-      "실제 백엔드(/chat) 응답을 변환해 표시 중입니다. 일부 값(조리시간·태그·상품점수·상품URL·탄수/지방)은 백엔드 미제공이라 비어 있습니다.",
+      "실제 백엔드(/chat) 응답을 변환해 표시 중입니다. 부족 재료의 가격과 상품 URL은 Chrome Extension 검색 후 확정됩니다.",
   };
 }

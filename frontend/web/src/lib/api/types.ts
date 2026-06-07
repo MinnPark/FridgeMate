@@ -242,3 +242,22 @@ export interface CartExecuteResponse {
   results: CartAddResult[];
   message: string;
 }
+
+export interface CoupangSearchCandidate {
+  name: string;
+  price: number;
+  url: string;
+  isAd: boolean;
+  isRocket: boolean;
+  delivery?: string;
+  score: number;
+}
+
+export interface CoupangProductSearchResult {
+  ingredient: string;
+  status: "success" | "notfound" | "blocked" | "failed";
+  searchUrl: string;
+  selected: CoupangSearchCandidate | null;
+  candidates: CoupangSearchCandidate[];
+  message: string;
+}

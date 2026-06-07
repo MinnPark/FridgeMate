@@ -7,6 +7,7 @@ import type {
   CartAddResult,
   CartExecuteItem,
   CartExecuteResponse,
+  CoupangProductSearchResult,
 } from "./types";
 
 /** 담기 진행 상황(품목 시작/완료). 확장 → 페이지로 실시간 전달된다. */
@@ -17,6 +18,15 @@ export interface ExecProgress {
   itemName?: string;
   done?: number;
   result?: CartAddResult;
+}
+
+export interface SearchProgress {
+  phase: "search-start" | "search-done";
+  index: number;
+  total: number;
+  itemName?: string;
+  done?: number;
+  result?: CoupangProductSearchResult;
 }
 
 /** 확장 프로그램에 살아있는지 핑을 보낸다(응답은 onExtensionReady 로 받음). */
@@ -71,5 +81,38 @@ export function executeViaExtension(
     }
     window.addEventListener("message", handler);
     window.postMessage({ type: "FRIDGEMATE_EXEC_CART", reqId, items }, "*");
+  });
+}
+
+/** 쿠팡 검색 결과를 확장에서 읽어 상품 후보와 자동 선택 결과를 받는다. */
+export function searchProductsViaExtension(
+  items: Array<{ ingredient: string; quantityText?: string }>,
+  onProgress?: (p: SearchProgress) => void,
+): Promise<CoupangProductSearchResult[]> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined") {
+      reject(new Error("브라우저 환경이 아닙니다."));
+      return;
+    }
+    const reqId = Math.random().toString(16).slice(2);
+    const handler = (e: MessageEvent) => {
+      if (e.source !== window || !e.data || e.data.reqId !== reqId) return;
+      if (e.data.type === "FRIDGEMATE_SEARCH_PROGRESS") {
+        onProgress?.(e.data as SearchProgress);
+      } else if (e.data.type === "FRIDGEMATE_SEARCH_RESULT") {
+        cleanup();
+        resolve((e.data.response?.results || []) as CoupangProductSearchResult[]);
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("쿠팡 상품 검색 시간이 초과되었습니다."));
+    }, 120000);
+    function cleanup() {
+      window.removeEventListener("message", handler);
+      clearTimeout(timer);
+    }
+    window.addEventListener("message", handler);
+    window.postMessage({ type: "FRIDGEMATE_SEARCH_PRODUCTS", reqId, items }, "*");
   });
 }
