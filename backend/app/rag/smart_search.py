@@ -27,6 +27,6 @@ async def smart_search(
     q = (query or "").strip()
     if not q:
         return await search_recipes(q, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
-    if len(q) < HYDE_THRESHOLD:
+    if len(q.replace(" ", "")) < HYDE_THRESHOLD:
         return await hyde_search(q, k=k, cuisine_filter=cuisine_filter, max_time=max_time)
     return await rag_fusion_search(q, k=k, cuisine_filter=cuisine_filter, max_time=max_time)

@@ -30,6 +30,9 @@ Thumbs.db
 # 로그
 *.log
 
+# 노트북 실험 산출물 (재생성물 — data/chroma 는 추적하지만 lab 은 무시)
+backend/data/lab/
+
 # 실제 비밀키 .env (example 은 추적 — 아래 negation. *.env 광역패턴은 example까지 먹어서 안 씀)
 .env
 .env.local

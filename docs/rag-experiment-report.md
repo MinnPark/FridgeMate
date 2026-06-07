@@ -3,6 +3,10 @@
 > 작성자: **neocello-ku** (B파트 RAG) · 2026-06-06
 > 대상: recipe_db 1,693건(식약처 1146 + 농정원 537 + seed 10), embed_sig=bge-m3-1024
 > 하네스: 16쿼리(오타/묘사/구어), 임베딩 bge-m3(LM Studio), LLM OpenRouter
+>
+> ⚠️ **2026-06-07 갱신**: 본 보고서 §4.2 "SMART 경로 기본 유지(+25%p)" 권장은 이후 검증으로 보완됨.
+> 그 +25%p는 **오타/묘사 16쿼리 + cloud Sonnet(run1)** 한정이고, **로컬 서브모델(qwen-7b)에선 PLAIN이 더 낫고 HyDE가 최약**.
+> **현재 권장 = 3엔진 RRF 병합(merged)** + 어려운 묘사형만 Claude. 상세: `rag-verification-report.md`, `rag-strategy-proposal.md` / 인덱스: `rag-INDEX.md`.
 
 ## 1. 결과 (베이스라인)
 | 경로 | P@1 | P@3 | MRR |
