@@ -26,7 +26,7 @@ pantry_agent (1) → recipe_agent (2) → meal_agent (3) → shopping_agent (4) 
 | 키 | 출처 | 설명 |
 |----|------|------|
 | `pantry_items` | `pantry_agent` | 재료 목록 + `expiry_priority` |
-| `selected_recipes` | `recipe_agent` | RAG 검색된 레시피 상위 3개 |
+| `selected_recipes` | `recipe_agent` | RAG 검색된 레시피 상위 **9개** ← 3→9 변경 |
 | `nutrition_goal` | `main.py ChatRequest` | 단백질·칼로리·탄수화물·지방 목표값 (모두 optional) |
 | `user_input` | 사용자 입력 | 자연어 요청 |
 
@@ -45,7 +45,7 @@ pantry_agent (1) → recipe_agent (2) → meal_agent (3) → shopping_agent (4) 
 | 키 | 사용처 | 설명 |
 |----|--------|------|
 | `meal_plan` | UI `MealPlanCard` | 3일 × 3끼 식단 계획 |
-| `nutrition_result` | UI `NutritionCard` | 영양 합산 + 목표 검증 결과 |
+| `nutrition_result` | UI `NutritionCard` | 영양 **하루 평균** + 목표 검증 결과 ← 변경 |
 | `selected_recipes` | `shopping_agent` | **recipe_agent 결과 그대로 유지 (오염 없음)** |
 | `logs` | UI `AgentPipelinePanel` | 실행 이벤트 로그 |
 
@@ -56,16 +56,22 @@ pantry_agent (1) → recipe_agent (2) → meal_agent (3) → shopping_agent (4) 
 ```
 meal_agent(state)
     │
-    ├── 1. create_weekly_plan(state)     ← LLM 1회 호출
-    │       └── _mark_priority_items()  ← usesPriorityItem 자동 보정 (LLM 없음)
+    ├── 1. create_weekly_plan(state)              ← LLM 1회 호출
+    │       ├── _sort_recipes_by_slot()           ← 칼로리 기준 슬롯 분류 (신규)
+    │       ├── generate_json()                   ← LLM 호출 (슬롯별 추천 목록 포함)
+    │       ├── _ensure_unique_recipes()          ← 중복 제거 / 허용 목록 보정 (신규)
+    │       ├── _mark_priority_items()            ← usesPriorityItem 자동 보정
+    │       └── _apply_slot_calories()            ← 칼로리 기준 후처리 보정 (신규)
     │
-    ├── 2. verify_nutrition_goal()       ← 영양 합산 계산 (LLM 없음, RAG 없음)
-    │       ├── _build_warnings()        ← 한국어 경고 문장 생성
-    │       └── _build_message()         ← 한국어 요약 메시지 생성
+    ├── 2. verify_nutrition_goal()                ← 영양 합산 계산 (LLM 없음, RAG 없음)
+    │       ├── 9개 레시피 전체 합산
+    │       ├── ÷ num_days(3) → 하루 평균 계산    ← 변경
+    │       ├── _build_warnings()                 ← 한국어 경고 문장 생성
+    │       └── _build_message()                  ← 한국어 요약 메시지 생성
     │
     └── 3. return state
             ├── meal_plan
-            ├── nutrition_result
+            ├── nutrition_result                  ← 하루 평균 기준
             ├── selected_recipes  ← recipe_agent 결과 그대로 (변경 없음)
             └── logs
 ```
@@ -79,36 +85,30 @@ meal_agent(state)
 
 ---
 
-## 테스트 시나리오 (오늘: 2026-06-06)
+## 테스트 시나리오 (오늘: 2026-06-07)
 
 ### 입력 데이터
 
 ```python
 # 냉장고 재료
 TEST_PANTRY_ITEMS = [
-    {"name": "닭가슴살", "expiry_priority": "normal", "expiration_date": "2026-06-10"},  # D+4
-    {"name": "계란",     "expiry_priority": "high",   "expiration_date": "2026-06-07"},  # D+1
-    {"name": "브로콜리", "expiry_priority": "high",   "expiration_date": "2026-06-08"},  # D+2
-    {"name": "두부",     "expiry_priority": "high",   "expiration_date": "2026-06-06"},  # D+0 ⚠️
+    {"name": "닭가슴살", "expiry_priority": "normal", "expiration_date": "2026-06-10"},  # D+3
+    {"name": "계란",     "expiry_priority": "high",   "expiration_date": "2026-06-08"},  # D+1
+    {"name": "브로콜리", "expiry_priority": "high",   "expiration_date": "2026-06-09"},  # D+2
+    {"name": "두부",     "expiry_priority": "high",   "expiration_date": "2026-06-07"},  # D+0 ⚠️
 ]
 
-# recipe_agent가 검색한 레시피
+# recipe_agent가 검색한 레시피 (9개) ← 3→9 변경
 TEST_SELECTED_RECIPES = [
-    {
-        "id": "rcp_1",
-        "name": "닭가슴살 두부 강된장 덮밥",
-        "nutrition": {"calories": 520, "protein": 45, "carbs": 38, "fat": 14},
-    },
-    {
-        "id": "rcp_2",
-        "name": "브로콜리 계란 스크램블",
-        "nutrition": {"calories": 280, "protein": 22, "carbs": 12, "fat": 18},
-    },
-    {
-        "id": "rcp_3",
-        "name": "닭가슴살 두부 스테이크",
-        "nutrition": {"calories": 410, "protein": 48, "carbs": 8, "fat": 16},
-    },
+    {"id": "rcp_1", "name": "두부오믈렛",              "nutrition": {"calories": 280, "protein": 22, "carbs": 12, "fat": 18}},
+    {"id": "rcp_2", "name": "브로콜리 계란 스크램블",   "nutrition": {"calories": 310, "protein": 24, "carbs": 14, "fat": 16}},
+    {"id": "rcp_3", "name": "두부곤약조림",             "nutrition": {"calories": 250, "protein": 18, "carbs": 10, "fat": 12}},
+    {"id": "rcp_4", "name": "닭가슴살 두부 강된장 덮밥","nutrition": {"calories": 520, "protein": 45, "carbs": 38, "fat": 14}},
+    {"id": "rcp_5", "name": "닭가슴살 브로콜리 볶음",   "nutrition": {"calories": 490, "protein": 48, "carbs": 16, "fat": 18}},
+    {"id": "rcp_6", "name": "닭가슴살 두부 스테이크",   "nutrition": {"calories": 410, "protein": 48, "carbs": 8,  "fat": 16}},
+    {"id": "rcp_7", "name": "두부 된장찌개",            "nutrition": {"calories": 350, "protein": 28, "carbs": 22, "fat": 14}},
+    {"id": "rcp_8", "name": "계란 현미 주먹밥",         "nutrition": {"calories": 380, "protein": 18, "carbs": 52, "fat": 10}},
+    {"id": "rcp_9", "name": "브로콜리 두부 샐러드",     "nutrition": {"calories": 210, "protein": 16, "carbs": 18, "fat": 8}},
 ]
 
 # 영양 목표 (main.py ChatRequest → graph.invoke() 에서 dict로 조립)
@@ -126,77 +126,126 @@ TEST_NUTRITION_GOAL = {
 
 ### 역할
 
-`selected_recipes`와 `pantry_items`를 LLM에 전달해  
+`selected_recipes`(9개)와 `pantry_items`를 LLM에 전달해  
 **3일 × 3끼 식단 계획 JSON**을 생성한다. **(LLM 1회만 호출)**
+
+### 칼로리 기준 슬롯 분류 (`_sort_recipes_by_slot()`) ← 신규
+
+9개 레시피를 칼로리 기준으로 3등분해 슬롯별 추천 목록을 만든다.
+
+```
+9개 레시피 칼로리 오름차순 정렬
+  브로콜리 두부 샐러드    210kcal  ┐
+  두부오믈렛             280kcal  ├─ 하위 3개 → 아침 (morning_titles)
+  두부곤약조림           250kcal  ┘
+  두부 된장찌개          350kcal  ┐
+  계란 현미 주먹밥        380kcal  ├─ 중간 3개 → 저녁 (dinner_titles)
+  브로콜리 계란 스크램블  310kcal  ┘
+  닭가슴살 두부 스테이크  410kcal  ┐
+  닭가슴살 두부 강된장    520kcal  ├─ 상위 3개 → 점심 (lunch_titles)
+  닭가슴살 브로콜리 볶음  490kcal  ┘
+```
 
 ### LLM에 전달하는 user_prompt
 
 ```
-사용자 요청: 냉장고에 닭가슴살, 계란, 브로콜리, 두부 있어. 고단백 저탄수. 2인분...
+사용자 요청: 냉장고에 계란, 브로콜리, 두부 있어. 고단백 저탄수. 2인분...
 냉장고 재료: ['닭가슴살', '계란', '브로콜리', '두부']
-유통기한 임박 재료(priority_items): ['계란', '브로콜리', '두부']   ← expiry_priority == "high"
-선택된 레시피 목록(반드시 이 목록에서만 선택): ['닭가슴살 두부 강된장 덮밥', '브로콜리 계란 스크램블', '닭가슴살 두부 스테이크']
+유통기한 임박 재료(priority_items): ['계란', '브로콜리', '두부']
+선택된 레시피 목록(반드시 이 목록에서만 선택): ['두부오믈렛', '브로콜리 계란 스크램블', ...]
 영양 목표: {'protein_target': 120, 'calorie_target': 1700, ...}
+아침 슬롯 추천 레시피(칼로리 낮은 순): ['브로콜리 두부 샐러드', '두부오믈렛', '두부곤약조림']
+점심 슬롯 추천 레시피(칼로리 높은 순): ['닭가슴살 두부 스테이크', '닭가슴살 두부 강된장 덮밥', '닭가슴살 브로콜리 볶음']
+저녁 슬롯 추천 레시피(칼로리 중간):   ['두부 된장찌개', '계란 현미 주먹밥', '브로콜리 계란 스크램블']
 ```
 
-### LLM 출력 (정상)
+### meal_prompts.py 슬롯별 배치 규칙 ← 변경
 
-```json
-{
-  "note": "임박 재료를 앞쪽 일자에 배치했어요.",
-  "days": [
-    {
-      "label": "1일차",
-      "entries": [
-        {"slot": "아침", "recipeTitle": "브로콜리 계란 스크램블",    "usesPriorityItem": true},
-        {"slot": "점심", "recipeTitle": "닭가슴살 두부 강된장 덮밥", "usesPriorityItem": true},
-        {"slot": "저녁", "recipeTitle": "닭가슴살 두부 스테이크",    "usesPriorityItem": true}
-      ]
-    },
-    {
-      "label": "2일차",
-      "entries": [
-        {"slot": "아침", "recipeTitle": "그릭요거트 + 방울토마토"},
-        {"slot": "점심", "recipeTitle": "닭가슴살 두부 강된장 덮밥"},
-        {"slot": "저녁", "recipeTitle": "브로콜리 계란 스크램블"}
-      ]
-    },
-    {
-      "label": "3일차",
-      "entries": [
-        {"slot": "아침", "recipeTitle": "계란 현미 주먹밥"},
-        {"slot": "점심", "recipeTitle": "닭가슴살 두부 스테이크"},
-        {"slot": "저녁", "recipeTitle": "닭가슴살 채소 볶음"}
-      ]
-    }
-  ]
-}
+```
+규칙 5: 9개 레시피를 3일 × 3끼 = 9개 슬롯에 각각 1번씩만 배치 (중복 사용 금지)
+규칙 6: 슬롯별 칼로리 배치 기준 반드시 준수
+  - 아침: morning_recipes 목록에서 선택 (칼로리 낮은 것)
+  - 점심: lunch_recipes  목록에서 선택 (칼로리 높은 것)
+  - 저녁: dinner_recipes 목록에서 선택 (칼로리 중간)
+```
+
+### 후처리 순서 (중요)
+
+```
+1. _ensure_unique_recipes()   ← 중복 제거 / 허용 목록 보정
+2. _mark_priority_items()     ← priority 재료 포함 끼니 표시
+3. _apply_slot_calories()     ← 칼로리 기준 슬롯 보정 (swap 방식)
 ```
 
 ### LLM 실패 시 fallback
 
-LLM 호출이 실패하거나 JSON 파싱 오류 발생 시 `selected_recipes` 기반으로 자동 생성한다.
+LLM 호출이 실패하거나 JSON 파싱 오류 발생 시 `selected_recipes` 인덱스 0~8 순서대로 자동 배치한다.
 
 ```python
 fallback = {
     "note": "임박 재료를 앞쪽 일자에 배치했어요.",
     "days": [
-        {
-            "label": "1일차",
-            "entries": [
-                {"slot": "아침",  "recipeTitle": "브로콜리 계란 스크램블",    "usesPriorityItem": True},
-                {"slot": "점심",  "recipeTitle": "닭가슴살 두부 강된장 덮밥", "usesPriorityItem": True},
-                {"slot": "저녁",  "recipeTitle": "닭가슴살 두부 스테이크",    "usesPriorityItem": True},
-            ],
-        },
-        ...
+        {"label": "1일차", "entries": [
+            {"slot": "아침", "recipeTitle": recipes[0], "usesPriorityItem": True},
+            {"slot": "점심", "recipeTitle": recipes[1], "usesPriorityItem": True},
+            {"slot": "저녁", "recipeTitle": recipes[2], "usesPriorityItem": True},
+        ]},
+        {"label": "2일차", "entries": [
+            {"slot": "아침", "recipeTitle": recipes[3], "usesPriorityItem": False},
+            {"slot": "점심", "recipeTitle": recipes[4], "usesPriorityItem": False},
+            {"slot": "저녁", "recipeTitle": recipes[5], "usesPriorityItem": False},
+        ]},
+        {"label": "3일차", "entries": [
+            {"slot": "아침", "recipeTitle": recipes[6], "usesPriorityItem": False},
+            {"slot": "점심", "recipeTitle": recipes[7], "usesPriorityItem": False},
+            {"slot": "저녁", "recipeTitle": recipes[8], "usesPriorityItem": False},
+        ]},
     ],
 }
 ```
 
 ---
 
-## STEP 1-1: `_mark_priority_items()` — usesPriorityItem 자동 보정
+## STEP 1-1: `_sort_recipes_by_slot()` — 칼로리 기준 슬롯 분류 ← 신규
+
+### 역할
+
+9개 레시피를 칼로리 오름차순 정렬 후 3등분해 아침/점심/저녁 슬롯 추천 목록을 반환한다.
+
+### 규칙
+
+```
+nutrition 없는 레시피 → calories=0 간주 → 아침 슬롯 우선
+recipes 빈 리스트     → ([], [], []) 반환
+```
+
+### 반환값
+
+| 반환 | 설명 |
+|------|------|
+| `morning_titles` | 칼로리 낮은 순 3개 이름 |
+| `lunch_titles`   | 칼로리 높은 순 3개 이름 |
+| `dinner_titles`  | 칼로리 중간 3개 이름   |
+
+---
+
+## STEP 1-2: `_ensure_unique_recipes()` — 중복 제거 ← 신규
+
+### 역할
+
+9개 레시피를 9개 슬롯에 1:1 배치 보장.
+
+### 처리 순서
+
+```
+1. 허용 목록 벗어난 recipeTitle → 미사용 레시피로 교체
+2. 중복 recipeTitle              → 미사용 레시피로 교체
+3. 미사용 레시피 소진 시          → 허용 목록 순환 (안전장치)
+```
+
+---
+
+## STEP 1-3: `_mark_priority_items()` — usesPriorityItem 자동 보정
 
 ### 역할
 
@@ -212,72 +261,100 @@ recipeTitle에 priority_names 중 하나라도 포함  →  usesPriorityItem = T
 recipeTitle에 priority_names 없음              →  usesPriorityItem = False
 ```
 
-### 보정 전 / 후 비교
-
-| 일차 | 슬롯 | recipeTitle | 보정 전 | 보정 후 | 이유 |
-|------|------|-------------|---------|---------|------|
-| 1일차 | 아침 | 브로콜리 계란 스크램블 | 없음 | `true` ✅ | "브로콜리", "계란" 포함 |
-| 1일차 | 점심 | 닭가슴살 두부 강된장 덮밥 | 없음 | `true` ✅ | "두부" 포함 |
-| 1일차 | 저녁 | 닭가슴살 채소 볶음 | 없음 | `false` | priority 재료 없음 |
-| 2일차 | 아침 | 그릭요거트 + 방울토마토 | 없음 | `false` | priority 재료 없음 |
-| 2일차 | 점심 | 두부 된장찌개 | `false` ← LLM 오류 | `true` ✅ | "두부" 포함 → 보정 |
-| 2일차 | 저녁 | 계란볶음밥 | 없음 | `true` ✅ | "계란" 포함 |
-
 ---
 
-## STEP 2: `verify_nutrition_goal()` — 영양 합산 검증
+## STEP 1-4: `_apply_slot_calories()` — 칼로리 기준 후처리 보정 ← 신규
 
 ### 역할
 
-`recipe_agent`의 `selected_recipes` (대표 레시피 3~5개)의 `nutrition` 값을 합산해  
-목표 달성 여부를 검증한다.  
-**외부 API 불필요** — ChromaDB `recipe_db`에 영양 데이터가 이미 포함되어 있다.  
-**RAG 추가 검색 없음** — `execute_meal_plan()` 제거로 `selected_recipes` 오염 없음.
+LLM이 잘못 배치한 경우 **swap 방식**으로 보정한다.
 
-### 합산 계산 (recipe_agent 선택 레시피 3개 기준)
+### 보정 규칙
 
 ```
-레시피                       calories  protein  carbs  fat
-─────────────────────────────────────────────────────────
-닭가슴살 두부 강된장 덮밥      520       45       38     14
-브로콜리 계란 스크램블         280       22       12     18
-닭가슴살 두부 스테이크         410       48        8     16
-─────────────────────────────────────────────────────────
-합계 (totals)               1,210      115       58     48
+아침 슬롯에 고칼로리(lunch_titles) 레시피 있으면
+  → 다른 슬롯의 저칼로리(morning_titles) 레시피와 서로 swap
 
-목표 (targets)              1,700      120      150     55
+점심 슬롯에 저칼로리(morning_titles) 레시피 있으면
+  → 다른 슬롯의 고칼로리(lunch_titles) 레시피와 서로 swap
+
+우선순위:
+  usesPriorityItem=True 이면 swap 건너뜀 (priority 1순위)
+```
+
+### swap 방식을 사용하는 이유
+
+```
+교체 방식 (변경 전):
+  아침에 고칼로리 → morning_unused[0]으로 교체
+  BUT morning_unused[0]이 이미 다른 슬롯에 배치된 것 → 중복 발생 ❌
+
+swap 방식 (변경 후):
+  아침 고칼로리 ↔ 다른 슬롯 저칼로리 서로 교환
+  → 중복 없음 ✅
+```
+
+---
+
+## STEP 2: `verify_nutrition_goal()` — 영양 합산 검증 ← 변경
+
+### 역할
+
+`selected_recipes` (9개)의 `nutrition` 값을 합산 후  
+**일수(num_days=3)로 나눠 하루 평균**을 목표값과 비교한다.
+
+### 계산 방식 변경
+
+```
+변경 전:
+  9개 합산 그대로 목표와 비교
+  → 총 칼로리 4500kcal vs 목표 1700kcal → 항상 초과 ❌
+
+변경 후:
+  9개 합산 ÷ 3(num_days) = 하루 평균
+  → 하루 평균 1500kcal vs 목표 1700kcal → 정상 비교 ✅
+```
+
+### 합산 계산 (9개 레시피 → 하루 평균)
+
+```
+레시피                         calories  protein  carbs  fat
+──────────────────────────────────────────────────────────────
+두부오믈렛                       280       22       12     18
+브로콜리 계란 스크램블             310       24       14     16
+두부곤약조림                      250       18       10     12
+닭가슴살 두부 강된장 덮밥           520       45       38     14
+닭가슴살 브로콜리 볶음             490       48       16     18
+닭가슴살 두부 스테이크             410       48        8     16
+두부 된장찌개                     350       28       22     14
+계란 현미 주먹밥                   380       18       52     10
+브로콜리 두부 샐러드               210       16       18      8
+──────────────────────────────────────────────────────────────
+합계 (total_sum)               3,200      267      190    126
+÷ 3 (하루 평균)                1,067       89       63     42
+
+목표 (targets / 하루 기준)      1,700      120      150     55
 ```
 
 ### `passed` 판정 기준
 
 ```python
 passed = (
-    totals["protein"]  >= targets["protein"]             # 115 >= 120  → False ❌
-    and totals["calories"] >= targets["calories"] * 0.9  # 1210 >= 1530 → False ❌
-    and totals["calories"] <= targets["calories"] * 1.1  # 1210 <= 1870 → True  ✅
+    totals["protein"]  >= targets["protein"]             # 89 >= 120  → False ❌
+    and totals["calories"] >= targets["calories"] * 0.9  # 1067 >= 1530 → False ❌
+    and totals["calories"] <= targets["calories"] * 1.1  # 1067 <= 1870 → True  ✅
 )
 # → passed = False
-```
-
-### `warnings` 생성
-
-```python
-warnings = [
-    "단백질이 목표(120g)에 미달해요. 닭가슴살·두부를 추가하면 좋아요.",
-    # fat(48) < 55 * 0.8(44) → False (경고 없음)
-    # carbs(58) > 150 * 1.2(180) → False (경고 없음)
-    "칼로리가 목표(1700kcal) 대비 부족해요. 한 끼 분량을 늘려보세요.",
-]
 ```
 
 ### 최종 반환값 (`nutrition_result`)
 
 ```python
 {
-    "protein":  {"current": 115,  "target": 120,  "unit": "g"},
-    "calories": {"current": 1210, "target": 1700, "unit": "kcal"},
-    "carbs":    {"current": 58,   "target": 150,  "unit": "g"},
-    "fat":      {"current": 48,   "target": 55,   "unit": "g"},
+    "protein":  {"current": 89,   "target": 120,  "unit": "g"},
+    "calories": {"current": 1067, "target": 1700, "unit": "kcal"},
+    "carbs":    {"current": 63,   "target": 150,  "unit": "g"},
+    "fat":      {"current": 42,   "target": 55,   "unit": "g"},
     "passed":   False,
     "message":  "목표 영양소를 충족하지 못했어요. 아래 경고를 확인해 주세요.",
     "warnings": [
@@ -289,121 +366,19 @@ warnings = [
 
 ---
 
-## STEP 3: `meal_agent()` 최종 반환 state
-
-```python
-{
-    # 기존 state 유지
-    **state,
-
-    # meal_agent 출력
-    "meal_plan": {
-        "note": "임박 재료를 앞쪽 일자에 배치했어요.",
-        "days": [
-            {
-                "label": "1일차",
-                "entries": [
-                    {"slot": "아침", "recipeTitle": "브로콜리 계란 스크램블",    "usesPriorityItem": True},
-                    {"slot": "점심", "recipeTitle": "닭가슴살 두부 강된장 덮밥", "usesPriorityItem": True},
-                    {"slot": "저녁", "recipeTitle": "닭가슴살 두부 스테이크",    "usesPriorityItem": True},
-                ],
-            },
-            {
-                "label": "2일차",
-                "entries": [
-                    {"slot": "아침", "recipeTitle": "그릭요거트 + 방울토마토",   "usesPriorityItem": False},
-                    {"slot": "점심", "recipeTitle": "닭가슴살 두부 강된장 덮밥", "usesPriorityItem": True},
-                    {"slot": "저녁", "recipeTitle": "브로콜리 계란 스크램블",    "usesPriorityItem": True},
-                ],
-            },
-            {
-                "label": "3일차",
-                "entries": [
-                    {"slot": "아침", "recipeTitle": "계란 현미 주먹밥",       "usesPriorityItem": True},
-                    {"slot": "점심", "recipeTitle": "닭가슴살 두부 스테이크",  "usesPriorityItem": True},
-                    {"slot": "저녁", "recipeTitle": "닭가슴살 채소 볶음",     "usesPriorityItem": False},
-                ],
-            },
-        ],
-    },
-
-    "nutrition_result": {
-        "protein":  {"current": 115,  "target": 120,  "unit": "g"},
-        "calories": {"current": 1210, "target": 1700, "unit": "kcal"},
-        "carbs":    {"current": 58,   "target": 150,  "unit": "g"},
-        "fat":      {"current": 48,   "target": 55,   "unit": "g"},
-        "passed":   False,
-        "message":  "목표 영양소를 충족하지 못했어요. 아래 경고를 확인해 주세요.",
-        "warnings": ["단백질이 목표(120g)에 미달해요...", "칼로리가 목표(1700kcal) 대비 부족해요..."],
-    },
-
-    # recipe_agent 결과 그대로 유지 (execute_meal_plan 제거로 오염 없음)
-    "selected_recipes": [rcp_1, rcp_2, rcp_3],
-
-    "logs": [
-        {"node": "meal", "event": "plan_created",      "plan_summary": {...}},
-        {"node": "meal", "event": "nutrition_verified", "result": {...}},
-        # plan_executed 이벤트 제거됨 (execute_meal_plan 삭제)
-    ],
-}
-```
-
----
-
-## UI 출력 결과
-
-### MealPlanCard
-
-```
-📅 3일 식단 플랜
-임박 재료를 앞쪽 일자에 배치했어요.
-
-1일차  ← 임박 재료 집중 배치
-  ⭐ 아침  브로콜리 계란 스크램블
-  ⭐ 점심  닭가슴살 두부 강된장 덮밥
-  ⭐ 저녁  닭가슴살 두부 스테이크
-
-2일차
-     아침  그릭요거트 + 방울토마토
-  ⭐ 점심  닭가슴살 두부 강된장 덮밥
-  ⭐ 저녁  브로콜리 계란 스크램블
-
-3일차
-  ⭐ 아침  계란 현미 주먹밥
-  ⭐ 점심  닭가슴살 두부 스테이크
-     저녁  닭가슴살 채소 볶음
-
-⭐ = usesPriorityItem: true (임박 재료 포함)
-```
-
-### NutritionCard
-
-```
-💪 영양 검증  ❌ FAIL
-
-단백질   ██████████░░  115 / 120g
-칼로리   ███████░░░░░  1210 / 1700kcal
-탄수화물 ████░░░░░░░░  58 / 150g
-지방     █████████░░░  48 / 55g
-
-목표 영양소를 충족하지 못했어요. 아래 경고를 확인해 주세요.
-
-⚠️ 단백질이 목표(120g)에 미달해요. 닭가슴살·두부를 추가하면 좋아요.
-⚠️ 칼로리가 목표(1700kcal) 대비 부족해요. 한 끼 분량을 늘려보세요.
-```
-
----
-
 ## 함수 목록
 
 | 함수 | LLM | RAG | 역할 |
 |------|-----|-----|------|
 | `meal_agent()` | ✅ 간접 | ❌ | 전체 오케스트레이션 |
 | `create_weekly_plan()` | ✅ 직접 | ❌ | 3일 식단 계획 생성 (LLM 1회) |
+| `_sort_recipes_by_slot()` | ❌ | ❌ | 칼로리 기준 슬롯 분류 ← 신규 |
+| `_ensure_unique_recipes()` | ❌ | ❌ | 9개 레시피 중복 제거 ← 신규 |
 | `_mark_priority_items()` | ❌ | ❌ | usesPriorityItem 자동 보정 |
-| ~~`execute_meal_plan()`~~ | ~~❌~~ | ~~✅~~  | **삭제됨** — RAG 9회 호출 + 영양 오염 문제 |
-| `_extract_constraints()` | ❌ | ❌ | user_input 키워드 추출 (shopping_agent 공유) |
-| `verify_nutrition_goal()` | ❌ | ❌ | 영양 합산 + 목표 검증 |
+| `_apply_slot_calories()` | ❌ | ❌ | 칼로리 기준 슬롯 swap 보정 ← 신규 |
+| ~~`execute_meal_plan()`~~ | ~~❌~~ | ~~✅~~ | **삭제됨** — RAG 9회 호출 + 영양 오염 문제 |
+| `_extract_constraints()` | ❌ | ❌ | user_input 키워드 추출 |
+| `verify_nutrition_goal()` | ❌ | ❌ | 영양 **하루 평균** + 목표 검증 ← 변경 |
 | `_build_warnings()` | ❌ | ❌ | 한국어 경고 문장 생성 |
 | `_build_message()` | ❌ | ❌ | 한국어 요약 메시지 생성 |
 | `_summarize_plan()` | ❌ | ❌ | 로그용 plan 요약 |
@@ -423,8 +398,11 @@ python tests/test_meal_agent.py
 |------|------|-----------|----------|
 | STEP 1 | `_mark_priority_items()` | ❌ | ❌ |
 | STEP 2 | `_extract_constraints()` | ❌ | ❌ |
-| STEP 3 | `verify_nutrition_goal()` | ❌ | ❌ |
-| STEP 4 | `create_weekly_plan()` | ✅ 필요 | ❌ |
-| STEP 5 | `selected_recipes` 오염 없음 확인 | ✅ 필요 | ❌ |
-| STEP 6 | `meal_agent()` 전체 | ✅ 필요 | ❌ |
-| STEP 7 | `meal_agent()` fallback | ✅ 필요 | ❌ |
+| STEP 3 | `verify_nutrition_goal()` 하루 평균 계산 | ❌ | ❌ |
+| STEP 4 | `_sort_recipes_by_slot()` 칼로리 분류 | ❌ | ❌ |
+| STEP 5 | `_ensure_unique_recipes()` 중복 제거 | ❌ | ❌ |
+| STEP 6 | `_apply_slot_calories()` swap 보정 | ❌ | ❌ |
+| STEP 7 | `create_weekly_plan()` LLM 호출 | ✅ 필요 | ❌ |
+| STEP 8 | `selected_recipes` 오염 없음 확인 | ✅ 필요 | ❌ |
+| STEP 9 | `meal_agent()` 전체 | ✅ 필요 | ❌ |
+| STEP 10 | `meal_agent()` fallback | ✅ 필요 | ❌ |

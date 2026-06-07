@@ -50,37 +50,40 @@ def retrieve_recipes(query: str, state: FridgeMateState) -> list[dict]:
     return results
 def _build_query(state: FridgeMateState) -> str:
     """
-    pantry_items + user_input → RAG 검색 쿼리 생성.
+    pantry_items + user_input + excluded_ingredients → RAG 검색 쿼리 생성.
 
     우선순위:
-      1. expiry_priority == "high" 재료를 앞에 배치 (유통기한 임박 재료 우선 소비)
-      2. priority 재료가 없으면 전체 재료 이름 사용
-      3. user_input 을 뒤에 결합
-      4. 둘 다 없으면 빈 문자열 반환
-
-    예시:
-      pantry=[두부(high), 계란(normal)], user_input="고단백 한식 식단 짜줘"
-      → "두부 고단백 한식 식단 짜줘" (14자 → RAG-Fusion)
-
-      pantry=[계란(normal)], user_input="식단"
-      → "계란 식단" (5자 → HyDE)
-
-      pantry=[두부(high)], user_input=""
-      → "두부" (2자 → HyDE)
+      1. excluded_ingredients 를 pantry_items 에서 먼저 제거
+      2. expiry_priority == "high" 재료를 앞에 배치
+      3. priority 재료가 없으면 전체 재료 이름 사용
+      4. user_input 을 뒤에 결합
+      5. 둘 다 없으면 빈 문자열 반환
     """
     pantry_items = state.get("pantry_items") or []
-    user_input = (state.get("user_input") or "").strip()
+    user_input   = (state.get("user_input") or "").strip()
+    excluded     = (state.get("excluded_ingredients") or "").strip()
 
-    # expiry_priority == "high" 재료 우선
+    # 제외 재료 set 생성
+    excluded_names = {
+        e.strip()
+        for e in excluded.split(",")
+        if e.strip()
+    }
+
+    # pantry에서 제외 재료 먼저 제거                    ← 핵심 변경
+    filtered_pantry = [
+        item for item in pantry_items
+        if item.get("name", "").strip() not in excluded_names
+    ]
+
     priority_names = [
         item["name"]
-        for item in pantry_items
+        for item in filtered_pantry
         if item.get("expiry_priority") == "high"
     ]
 
-    # priority 재료가 없으면 전체 재료 이름 사용
     if not priority_names:
-        priority_names = [item["name"] for item in pantry_items]
+        priority_names = [item["name"] for item in filtered_pantry]
 
     parts: list[str] = []
     if priority_names:
@@ -89,6 +92,76 @@ def _build_query(state: FridgeMateState) -> str:
         parts.append(user_input)
 
     return " ".join(parts)
+
+
+def _filter_excluded(recipes: list[dict], excluded_str: str) -> list[dict]:
+    """
+    excluded_str 에 포함된 재료가 들어간 레시피 제거
+
+    규칙:
+      - 쉼표(,) 구분으로 복수 재료 처리
+      - 정확한 이름 매칭만 허용 ("닭" 이라고 해서 "닭가슴살" 제외 안 됨)
+      - 필터 후 결과 0개면 필터 미적용 → 원본 반환 (fallback)
+      - excluded_str 비어있으면 원본 그대로 반환
+
+    예시:
+      excluded_str = "닭가슴살"
+      → ingredients 에 "닭가슴살" 포함된 레시피 제외
+
+      excluded_str = "닭가슴살, 돼지고기"
+      → 두 재료 중 하나라도 포함된 레시피 제외
+    """
+    if not excluded_str:
+        return recipes
+
+    excluded_names = {
+        e.strip()
+        for e in excluded_str.split(",")
+        if e.strip()
+    }
+
+    filtered = []
+    for r in recipes:
+        # 1. ingredients 필드 검사 (정확한 이름 매칭)
+        ingredient_names = {
+            ing.get("name", "").strip()
+            for ing in r.get("ingredients", [])
+        }
+
+        # 2. 레시피 이름 검사 (부분 포함 검사)      ← 추가
+        recipe_name = r.get("name", "")
+
+        # 둘 중 하나라도 걸리면 제외
+        excluded_by_ingredient = bool(excluded_names & ingredient_names)
+        excluded_by_name       = any(
+            exc in recipe_name for exc in excluded_names
+        )
+
+        if excluded_by_ingredient or excluded_by_name:
+            print(
+                f"[recipe_agent] 제외: '{recipe_name}' "
+                f"(ingredient={excluded_by_ingredient}, name={excluded_by_name})",
+                flush=True,
+            )
+            continue
+
+        filtered.append(r)
+
+    # fallback: 필터 후 0개면 원본 반환
+    if not filtered:
+        print(
+            f"[recipe_agent] _filter_excluded: 필터 후 0개 → fallback(원본 반환) "
+            f"excluded={excluded_names}",
+            flush=True,
+        )
+        return recipes
+
+    print(
+        f"[recipe_agent] _filter_excluded: {len(recipes)}개 → {len(filtered)}개 "
+        f"excluded={excluded_names}",
+        flush=True,
+    )
+    return filtered
 
 
 def recipe_agent(state: FridgeMateState) -> FridgeMateState:
@@ -120,8 +193,6 @@ def recipe_agent(state: FridgeMateState) -> FridgeMateState:
     query = _build_query(state)
 
     # 2. RAG 검색
-    # retrieve_recipes 가 state["recipe_search_trace"] 를 직접 설정하는 부수효과 존재
-    # → 반환 후 {**state} 에 recipe_search_trace 가 포함됨
     try:
         results = retrieve_recipes(query, state)
     except Exception as e:
@@ -139,8 +210,10 @@ def recipe_agent(state: FridgeMateState) -> FridgeMateState:
             "logs": logs,
         }
 
-    # 3. 상위 3개 선택
-    selected = results[:3]
+    # 3. 제외 재료 필터링 후 상위 9개 선택                     ← 수정
+    excluded_str = (state.get("excluded_ingredients") or "").strip()
+    filtered     = _filter_excluded(results, excluded_str)
+    selected     = filtered[:9]
 
     # 4. 임박 재료 중 실제 레시피에 포함된 것 추적
     priority_items_used = [
@@ -161,9 +234,10 @@ def recipe_agent(state: FridgeMateState) -> FridgeMateState:
         node="recipe",
         event="rag_retrieval_completed",
         result={
-            "strategy": trace.get("strategy", ""),
-            "original_query": query,
-            "recipes_found": len(selected),
+            "strategy":           trace.get("strategy", ""),
+            "original_query":     query,
+            "recipes_found":      len(selected),
+            "excluded":           excluded_str or None,              # ← 추가
             "priority_items_used": priority_items_used,
         },
     )
@@ -172,6 +246,4 @@ def recipe_agent(state: FridgeMateState) -> FridgeMateState:
         **state,
         "selected_recipes": selected,
         "logs": logs,
-        # recipe_search_trace 는 retrieve_recipes 가 state 에 직접 설정했으므로
-        # {**state} 에 이미 포함됨 → 별도 명시 불필요
     }

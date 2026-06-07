@@ -7,16 +7,156 @@ from app.tools.nutrition_tools import verify_nutrition_goal
 from app.tools.pantry_tools import parse_pantry_items
 
 
+# ─────────────────────────────────────────────────────────────
+# STEP 2: 칼로리 기준 슬롯 분류
+# ─────────────────────────────────────────────────────────────
+def _sort_recipes_by_slot(
+    recipes: list[dict],
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    9개 레시피를 칼로리 기준으로 아침/점심/저녁 슬롯으로 분류
+
+    반환:
+      morning_titles  → 칼로리 낮은 순 (아침)
+      lunch_titles    → 칼로리 높은 순 (점심)
+      dinner_titles   → 칼로리 중간    (저녁)
+
+    엣지케이스:
+      nutrition 없는 레시피 → calories=0 으로 간주 → 아침 슬롯 우선
+      recipes 빈 리스트     → ([], [], []) 반환
+    """
+    if not recipes:
+        return [], [], []
+
+    def get_calories(recipe: dict) -> float:
+        nutrition = recipe.get("nutrition") or {}
+        return float(nutrition.get("calories") or 0)
+
+    sorted_recipes = sorted(recipes, key=get_calories)
+    n     = len(sorted_recipes)
+    chunk = max(1, n // 3)
+
+    morning = sorted_recipes[:chunk]            # 하위 (낮은 칼로리)
+    lunch   = sorted_recipes[n - chunk:]        # 상위 (높은 칼로리)
+    dinner  = sorted_recipes[chunk: n - chunk]  # 중간
+
+    return (
+        [r.get("name", "") for r in morning],
+        [r.get("name", "") for r in lunch],
+        [r.get("name", "") for r in dinner],
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# STEP 3: 칼로리 기준 후처리 보정
+# ─────────────────────────────────────────────────────────────
+def _apply_slot_calories(
+    plan: dict,
+    morning: list[str],
+    lunch: list[str],
+    dinner: list[str],
+) -> dict:
+    if not morning and not lunch and not dinner:
+        return plan
+
+    morning_set = set(morning)
+    lunch_set   = set(lunch)
+
+    all_entries = [
+        entry
+        for day in plan.get("days", [])
+        for entry in day.get("entries", [])
+    ]
+
+    for i, entry in enumerate(all_entries):
+        if entry.get("usesPriorityItem"):
+            continue
+
+        slot  = entry.get("slot", "")
+        title = entry.get("recipeTitle", "")
+
+        if slot == "아침" and title in lunch_set:
+            for other in all_entries:
+                if other is entry:
+                    continue
+                if other.get("usesPriorityItem"):
+                    continue
+                other_title = other.get("recipeTitle", "")
+                if other.get("slot") != "아침" and other_title in morning_set:
+                    entry["recipeTitle"] = other_title
+                    other["recipeTitle"] = title
+                    break
+
+        elif slot == "점심" and title in morning_set:
+            for other in all_entries:
+                if other is entry:
+                    continue
+                if other.get("usesPriorityItem"):
+                    continue
+                other_title = other.get("recipeTitle", "")
+                if other.get("slot") != "점심" and other_title in lunch_set:
+                    entry["recipeTitle"] = other_title
+                    other["recipeTitle"] = title
+                    break
+
+    return plan
+
+
+# ─────────────────────────────────────────────────────────────
+# 기존 _constrain_recipe_titles → _ensure_unique_recipes 교체
+# ─────────────────────────────────────────────────────────────
+def _ensure_unique_recipes(plan: dict, recipe_titles: list[str]) -> dict:
+    """
+    9개 레시피를 9개 슬롯에 1:1 배치 보장
+
+    처리 순서:
+      1. 허용 목록 벗어난 recipeTitle → 미사용 레시피로 교체
+      2. 중복 recipeTitle              → 미사용 레시피로 교체
+      3. 미사용 레시피 소진 시          → 허용 목록 순환 (안전장치)
+    """
+    if not recipe_titles:
+        return plan
+
+    allowed = set(recipe_titles)
+    used    = set()
+    unused  = list(recipe_titles)
+
+    for day in plan.get("days", []):
+        for entry in day.get("entries", []):
+            title = entry.get("recipeTitle")
+
+            # 허용 목록에 있고 아직 사용 안 했으면 그대로 사용
+            if title in allowed and title not in used:
+                used.add(title)
+                if title in unused:
+                    unused.remove(title)
+                continue
+
+            # 허용 목록 밖이거나 중복 → 미사용 레시피로 교체
+            if unused:
+                replacement = unused.pop(0)
+                entry["recipeTitle"] = replacement
+                used.add(replacement)
+            else:
+                # 미사용 소진 시 순환 (9개 초과 슬롯 안전장치)
+                entry["recipeTitle"] = recipe_titles[len(used) % len(recipe_titles)]
+
+    return plan
+
+
+# ─────────────────────────────────────────────────────────────
+# STEP 4: create_weekly_plan() 수정
+# ─────────────────────────────────────────────────────────────
 def create_weekly_plan(state: FridgeMateState) -> dict:
     """
     LLM을 사용해 3일 meal prep 식단 계획 생성. (LLM 1회 호출)
 
     입력:
       state["pantry_items"]       → 재료 + expiry_priority
-      state["selected_recipes"]   → recipe_agent가 검색한 레시피 목록
+      state["selected_recipes"]   → recipe_agent가 검색한 레시피 목록 (최대 9개)
       state["nutrition_goal"]     → 영양 목표
 
-    출력 (mock.ts mealPlan 계약 형태):
+    출력:
       {
         "note": "임박 재료를 앞쪽 일자에 배치했어요.",
         "days": [
@@ -32,45 +172,46 @@ def create_weekly_plan(state: FridgeMateState) -> dict:
     pantry_items     = state.get("pantry_items") or []
     selected_recipes = state.get("selected_recipes") or []
 
-    # priority_items: expiry_priority == "high" 재료 이름 목록
     priority_items = [
         item["name"] for item in pantry_items
         if item.get("expiry_priority") == "high"
     ]
-    # recipe_agent가 검색한 레시피 이름 목록 → LLM에 전달
     recipe_titles = [r.get("name", "") for r in selected_recipes]
 
+    # ── 칼로리 기준 슬롯 분류 ────────────────────────────────
+    morning_titles, lunch_titles, dinner_titles = _sort_recipes_by_slot(selected_recipes)
+
+    # ── fallback: index 0~8 순서대로 1:1 배치 ────────────────
     def recipe_at(index: int, default: str) -> str:
-        if recipe_titles:
-            return recipe_titles[index % len(recipe_titles)]
+        if index < len(recipe_titles):
+            return recipe_titles[index]
         return default
 
-    # LLM 실패 시 fallback (selected_recipes 기반으로 자동 구성)
     fallback = {
         "note": "임박 재료를 앞쪽 일자에 배치했어요.",
         "days": [
             {
                 "label": "1일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": recipe_at(1, "브로콜리 계란 스크램블"), "usesPriorityItem": True},
-                    {"slot": "점심", "recipeTitle": recipe_at(0, "닭가슴살 두부 강된장 덮밥"), "usesPriorityItem": True},
-                    {"slot": "저녁", "recipeTitle": recipe_at(2, "닭가슴살 두부 스테이크"), "usesPriorityItem": True},
+                    {"slot": "아침", "recipeTitle": recipe_at(0, "레시피1"), "usesPriorityItem": True},
+                    {"slot": "점심", "recipeTitle": recipe_at(1, "레시피2"), "usesPriorityItem": True},
+                    {"slot": "저녁", "recipeTitle": recipe_at(2, "레시피3"), "usesPriorityItem": True},
                 ],
             },
             {
                 "label": "2일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": recipe_at(0, "그릭요거트 + 방울토마토")},
-                    {"slot": "점심", "recipeTitle": recipe_at(1, "닭가슴살 두부 강된장 덮밥")},
-                    {"slot": "저녁", "recipeTitle": recipe_at(2, "브로콜리 계란 스크램블")},
+                    {"slot": "아침", "recipeTitle": recipe_at(3, "레시피4"), "usesPriorityItem": False},
+                    {"slot": "점심", "recipeTitle": recipe_at(4, "레시피5"), "usesPriorityItem": False},
+                    {"slot": "저녁", "recipeTitle": recipe_at(5, "레시피6"), "usesPriorityItem": False},
                 ],
             },
             {
                 "label": "3일차",
                 "entries": [
-                    {"slot": "아침", "recipeTitle": recipe_at(2, "계란 현미 주먹밥")},
-                    {"slot": "점심", "recipeTitle": recipe_at(0, "닭가슴살 두부 스테이크")},
-                    {"slot": "저녁", "recipeTitle": recipe_at(1, "닭가슴살 채소 볶음")},
+                    {"slot": "아침", "recipeTitle": recipe_at(6, "레시피7"), "usesPriorityItem": False},
+                    {"slot": "점심", "recipeTitle": recipe_at(7, "레시피8"), "usesPriorityItem": False},
+                    {"slot": "저녁", "recipeTitle": recipe_at(8, "레시피9"), "usesPriorityItem": False},
                 ],
             },
         ],
@@ -84,36 +225,25 @@ def create_weekly_plan(state: FridgeMateState) -> dict:
             f"유통기한 임박 재료(priority_items): {priority_items}\n"
             f"선택된 레시피 목록(반드시 이 목록에서만 선택): {recipe_titles}\n"
             f"영양 목표: {state.get('nutrition_goal', {})}\n"
-            "위 재료와 레시피를 활용해 3일 meal prep 식단 계획을 JSON으로 작성하세요."
+            f"아침 슬롯 추천 레시피(칼로리 낮은 순): {morning_titles}\n"
+            f"점심 슬롯 추천 레시피(칼로리 높은 순): {lunch_titles}\n"
+            f"저녁 슬롯 추천 레시피(칼로리 중간):   {dinner_titles}\n"
+            "위 재료와 레시피를 활용해 3일 meal prep 식단 계획을 JSON으로 작성하세요.\n"
+            "⚠️ 규칙: 9개 레시피를 3일 × 3끼 = 9개 슬롯에 각각 1번씩만 배치하세요. 중복 사용 금지."
         ),
         fallback=fallback,
     )
 
-    # 필수 키 보정
     plan.setdefault("note", fallback["note"])
     plan.setdefault("days", fallback["days"])
 
-    # Shopping Agent는 meal_plan의 recipeTitle을 selected_recipes와 이름으로 매핑한다.
-    # LLM이 목록 밖 레시피를 만들면 재료 계산이 누락되므로 허용 목록으로 보정한다.
-    plan = _constrain_recipe_titles(plan, recipe_titles)
+    # 후처리 순서 중요: unique → priority → calories
+    plan = _ensure_unique_recipes(plan, recipe_titles)          # 1. 중복 제거
+    plan = _mark_priority_items(plan, pantry_items)             # 2. priority 보정
+    plan = _apply_slot_calories(                                # 3. 칼로리 보정
+        plan, morning_titles, lunch_titles, dinner_titles
+    )
 
-    # usesPriorityItem 자동 보정 (LLM이 누락하거나 틀렸을 때 대비)
-    plan = _mark_priority_items(plan, pantry_items)
-
-    return plan
-
-
-def _constrain_recipe_titles(plan: dict, recipe_titles: list[str]) -> dict:
-    if not recipe_titles:
-        return plan
-
-    index = 0
-    allowed = set(recipe_titles)
-    for day in plan.get("days", []):
-        for entry in day.get("entries", []):
-            if entry.get("recipeTitle") not in allowed:
-                entry["recipeTitle"] = recipe_titles[index % len(recipe_titles)]
-            index += 1
     return plan
 
 
@@ -121,8 +251,6 @@ def _mark_priority_items(plan: dict, pantry_items: list[dict]) -> dict:
     """
     recipeTitle에 priority(high) 재료 이름이 포함된 끼니는
     usesPriorityItem: true 자동 설정.
-
-    LLM이 usesPriorityItem을 누락하거나 잘못 표시한 경우 보정한다.
     """
     priority_names = [
         item["name"] for item in pantry_items
@@ -148,28 +276,16 @@ def meal_agent(state: FridgeMateState) -> FridgeMateState:
     입력:  state["pantry_items"]       (pantry_agent 생성)
            state["selected_recipes"]   (recipe_agent 생성)
            state["nutrition_goal"]     (main.py ChatRequest)
-    출력:  state["meal_plan"]          (UI MealPlanCard용)
-           state["nutrition_result"]   (UI NutritionCard + chatAdapter.ts 매핑)
-           state["selected_recipes"]   (recipe_agent 결과 그대로 유지 — 오염 없음)
+    출력:  state["meal_plan"]
+           state["nutrition_result"]
+           state["selected_recipes"]   (recipe_agent 결과 그대로 유지)
            state["logs"]
-
-    변경 사항:
-      execute_meal_plan() 제거
-        → RAG 9회 호출 제거 (문제 3 해결)
-        → selected_recipes 오염 제거 (문제 2 해결)
-      verify_nutrition_goal()는 recipe_agent의 selected_recipes만 사용
-        → 일일 대표 레시피(3~5개) 영양 합산 = 일일 nutrition_goal과 직접 비교
     """
     pantry_items = state.get("pantry_items") or parse_pantry_items(state.get("user_input", ""))
     state["pantry_items"] = pantry_items
 
-    # 1. 3일 meal prep 식단 계획 생성 (LLM 1회 호출)
     plan = create_weekly_plan(state)
 
-    # 2. 영양 검증
-    #    recipe_agent의 selected_recipes만 사용 (execute_meal_plan 제거)
-    #    → selected_recipes = 이 식단의 대표 레시피 3~5개
-    #    → 영양 합산 = 일일 섭취 기준과 직접 비교 가능
     selected_recipes = state.get("selected_recipes") or []
     nutrition_check = verify_nutrition_goal(
         selected_recipes,
@@ -193,14 +309,14 @@ def meal_agent(state: FridgeMateState) -> FridgeMateState:
     return {
         **state,
         "meal_plan":        plan,
-        "selected_recipes": selected_recipes,   # recipe_agent 결과 그대로 유지
+        "selected_recipes": selected_recipes,
         "nutrition_result": nutrition_check,
         "logs":             logs,
     }
 
 
 def _extract_constraints(user_input: str) -> list[str]:
-    """user_input에서 제약 조건 키워드 추출. shopping_agent에서도 활용 가능."""
+    """user_input에서 제약 조건 키워드 추출."""
     constraints = []
     for token in ["고단백", "저칼로리", "저탄수", "한식", "예산", "주간", "간단"]:
         if token in user_input:
@@ -209,7 +325,7 @@ def _extract_constraints(user_input: str) -> list[str]:
 
 
 def _summarize_plan(plan: dict) -> dict:
-    """로그용 plan 요약 — entries/recipeTitle 기준"""
+    """로그용 plan 요약"""
     meals = [
         entry.get("recipeTitle")
         for day in plan.get("days", [])

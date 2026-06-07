@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., examples=["냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘"])
     budget_limit: int | None = Field(default=None, examples=[30000])
     ingredient_entries: list[IngredientEntry] = Field(default_factory=list)
+    excluded_ingredients: str | None = Field(default=None, examples=["닭가슴살,돼지고기"])  # ← 추가
 
     # 영양 목표 — 모두 optional, 없으면 nutrition_tools.py 기본값 사용
     protein_target_gram:  int | None = Field(default=None, examples=[120])
@@ -54,14 +55,15 @@ def chat(req: ChatRequest):
 
     result = graph.invoke(
         {
-            "user_input": req.message,
-            "ingredient_entries": [
+            "user_input":            req.message,
+            "ingredient_entries":    [
                 entry.model_dump() for entry in req.ingredient_entries
             ],
-            "budget_limit": req.budget_limit,
-            "nutrition_goal": nutrition_goal,   # ← 추가
-            "retry_count": 0,
-            "logs": [],
+            "budget_limit":          req.budget_limit,
+            "nutrition_goal":        nutrition_goal,
+            "excluded_ingredients":  req.excluded_ingredients or "",  # ← 추가
+            "retry_count":           0,
+            "logs":                  [],
         }
     )
     return result

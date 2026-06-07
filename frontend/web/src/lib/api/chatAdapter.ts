@@ -26,10 +26,11 @@ export interface ChatRequest {
   calorie_target_kcal?: number | null;
   carbs_target_gram?: number | null;
   fat_target_gram?: number | null;
+  excluded_ingredients?: string | null;   // ← 추가
   ingredient_entries?: {
     name: string;
     amount: string;
-    expiration_date: string; // "YYYY-MM-DD"
+    expiration_date: string;
     storage_type: string;
   }[];
 }
@@ -133,11 +134,24 @@ export interface ChatState {
 
 // ── 요청 매퍼: 구조화 입력 → { message, budget_limit } ───────────────────────
 export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
-  const names = req.ingredients.trim();
+  // 제외 재료를 ingredients에서 먼저 제거                        ← 추가
+  const excludedSet = new Set(
+    (req.excludedIngredients ?? "")
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean)
+  );
+
+  const filteredIngredients = req.ingredients
+    .split(",")
+    .map((i) => i.trim())
+    .filter((i) => i && !excludedSet.has(i))
+    .join(", ");
+
+  // 필터 후 재료가 0개면 원본 사용 (fallback)
+  const names = (filteredIngredients || req.ingredients).trim();
   const goal = req.goal?.trim();
 
-  // 구조화된 조건들을 자연어로 변환
-  // ⚠️ "레시피/요리" 단어 금지 — supervisor 가 recipe 노드로만 라우팅됨
   const conditions: string[] = [];
   if (req.peopleCount)         conditions.push(`${req.peopleCount}인분`);
   if (req.maxCookingMinutes)   conditions.push(`조리 ${req.maxCookingMinutes}분 이내`);
@@ -155,6 +169,7 @@ export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
     budget_limit: req.budgetKrw ?? null,
     protein_target_gram: req.proteinTargetGram ?? null,
     calorie_target_kcal: req.calorieTargetKcal ?? null,
+    excluded_ingredients: req.excludedIngredients ?? null,
     ingredient_entries: req.ingredientEntries?.map((e) => ({
       name: e.name,
       amount: e.amount,
