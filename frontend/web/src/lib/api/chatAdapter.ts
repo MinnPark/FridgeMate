@@ -22,6 +22,10 @@ import type {
 export interface ChatRequest {
   message: string;
   budget_limit?: number | null;
+  protein_target_gram?: number | null;
+  calorie_target_kcal?: number | null;
+  carbs_target_gram?: number | null;
+  fat_target_gram?: number | null;
   ingredient_entries?: {
     name: string;
     amount: string;
@@ -47,6 +51,20 @@ interface BackendMeal {
   slot: string;
   name: string;
   reason?: string;
+}
+interface BackendLog {
+  node?: string;
+  event?: string;
+  result?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+interface BackendPantryAnalysisItem {
+  name: string;
+  category?: string;
+  freshness?: FreshnessLevel;
+  amount?: string | null;
+  expiry_label?: string | null;
+  note?: string | null;
 }
 
 // 새 meal_agent 출력 형식 (entries 기반)
@@ -130,6 +148,8 @@ export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
   return {
     message,
     budget_limit: req.budgetKrw ?? null,
+    protein_target_gram: req.proteinTargetGram ?? null,
+    calorie_target_kcal: req.calorieTargetKcal ?? null,
     ingredient_entries: req.ingredientEntries?.map((e) => ({
       name: e.name,
       amount: e.amount,
