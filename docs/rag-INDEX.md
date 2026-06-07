@@ -4,6 +4,8 @@
 
 | # | 문서 | 날짜 | 목적 | 상태 |
 |---|---|---|---|---|
+| 0 | `rag-io-contract.md` | **2026-06-08** | **에이전트<->RAG 입출력 계약(구현 명세)** — query+constraints 입력 / 응답 dict 샘플 + constraints 파싱 위치 결정(에이전트가) | 최신·구현명세 |
+| 0.5 | `rag-support-plan.md` | **2026-06-07** | **RAG 보강 작업 계획** — 영양·제약·필터/검색 전반, 팀 요구 기반·협의용 | 작업계획 |
 | 1 | `rag-strategy-proposal.md` | **2026-06-07** | PLAIN/HyDE/Fusion/**MERGE** + 서브모델(qwen/gpt-oss-20b/claude) 비교 → 에이전트 라우팅 **제안** | 최신·제안 |
 | 2 | `rag-verification-report.md` | **2026-06-07** | 튜닝본 로컬 **검증** — HyDE/Fusion 라우팅별 흐름 + P/R/MRR(4장르) | 최신·검증 |
 | 2.5 | `rag-tuning-changelog.md` | **2026-06-07** | **튜닝 변경 내역(문제→원인→해결)**: Fusion 후보풀 확대·score 정규화·길이기준 통일 | 최신·변경내역 |

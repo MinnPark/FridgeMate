@@ -1,0 +1,25 @@
+{
+  "collected_at": "2026-06-07T13:57:21.662032+00:00",
+  "channels": {
+    "cookrcp": {
+      "service": "COOKRCP01",
+      "count": 1146,
+      "key": "real"
+    },
+    "mafra_basic": {
+      "count": 537,
+      "key": "real"
+    },
+    "mafra_ingredient": {
+      "count": 6104,
+      "key": "real"
+    },
+    "mafra_process": {
+      "count": 3022,
+      "key": "real"
+    },
+    "mafra_nutrition": {
+      "status": "pending(service id 미확정)"
+    }
+  }
+}
