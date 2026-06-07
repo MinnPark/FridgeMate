@@ -25,7 +25,8 @@ class FridgeMateState(TypedDict, total=False):
     meal_plan: dict[str, Any]
 
     # 장보기
-    missing_ingredients: list[dict[str, Any]]
+    missing_ingredients: list[dict]
+    # 구조: [{"name": str, "amount": float|None, "unit": str|None, "needed_by": [str]}]
     cart_items: list[dict[str, Any]]
     budget_limit: int | None
 
