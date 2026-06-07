@@ -192,8 +192,10 @@ function formatMissingQuantity(
   unit?: string | null,
 ): string {
   if (amount === undefined || amount === null) return unit || "수량 확인 필요";
-  // 소수점이 길게 표시되는 문제 → 정수로 반올림.
-  const value = String(Math.round(amount));
+  const rounded = Math.round(amount * 100) / 100;
+  const value = Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
   return `${value}${unit ?? ""}`;
 }
 

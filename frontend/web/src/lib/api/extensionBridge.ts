@@ -37,10 +37,12 @@ export function pingExtension(): void {
 }
 
 /** 확장 프로그램 준비(설치/활성) 신호를 구독. 해제 함수를 반환. */
-export function onExtensionReady(cb: () => void): () => void {
+export function onExtensionReady(cb: (version?: string) => void): () => void {
   if (typeof window === "undefined") return () => {};
   const handler = (e: MessageEvent) => {
-    if (e.source === window && e.data?.type === "FRIDGEMATE_EXT_READY") cb();
+    if (e.source === window && e.data?.type === "FRIDGEMATE_EXT_READY") {
+      cb(e.data.version);
+    }
   };
   window.addEventListener("message", handler);
   return () => window.removeEventListener("message", handler);
@@ -112,7 +114,7 @@ export function searchProductsViaExtension(
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("쿠팡 상품 검색 시간이 초과되었습니다."));
-    }, 120000);
+    }, 600000);
     function cleanup() {
       window.removeEventListener("message", handler);
       clearTimeout(timer);
