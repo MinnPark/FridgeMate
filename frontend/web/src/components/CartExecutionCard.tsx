@@ -187,7 +187,8 @@ export function CartExecutionCard({
         missing.map((item) => ({
           ingredient: item.name,
           quantityText: item.quantity,
-          neededG: item.neededG,
+          neededAmount: item.neededAmount,
+          neededUnit: item.neededUnit,
           preference: deliveryPreference,
         })),
         (p: SearchProgress) => {

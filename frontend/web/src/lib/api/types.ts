@@ -161,7 +161,8 @@ export interface ShoppingItem {
   alternativeFor?: string; // 어떤 재료의 대체재인지
   productUrl?: string; // 쿠팡 상품 URL (자동 담기 대상, 없으면 skipped) — mock/API 제공
   score?: ScoreInfo; // 상품 점수 (mock/백엔드 제공)
-  neededG?: number; // 필요 총량(그램 가정). 검색 상품 용량과 비교해 담을 개수 산정용.
+  neededAmount?: number; // 필요 총량(neededUnit 기준). 검색 상품 용량과 비교해 담을 개수 산정용.
+  neededUnit?: "g" | "ml"; // 필요 총량 단위 계열(무게 g / 부피 ml).
 }
 
 export interface ShoppingList {

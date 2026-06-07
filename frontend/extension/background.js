@@ -379,8 +379,8 @@ function extractSearchCandidatesInPage(limit) {
     const value = Number(digits);
     return Number.isFinite(value) && value > 0 ? value : null;
   };
-  // 상품명에서 용량(그램 가정) 추정: 숫자+단위 × 멀티팩. 못 구하면 null.
-  // (단순화: 모든 단위를 g로 본다. kg/l/리터/킬로만 ×1000.)
+  // 상품명에서 용량 추정: 숫자+단위 × 멀티팩. 못 구하면 null.
+  // 무게(g)·부피(ml)를 기본단위로 반환(kg/l/리터/킬로만 ×1000). 검색 단위와 같은 계열끼리 비교.
   const parseAmountG = (text) => {
     const s = String(text || "");
     // 용량(첫 번째 숫자+단위). "(10g당 …)" 단가 표기는 뒤에 오므로 보통 영향 없음.
@@ -665,9 +665,10 @@ async function extractCandidatesWithRetry(tabId) {
 
 async function searchOneIngredient(item, reusableTabId) {
   const ingredient = item.ingredient;
-  const neededG = Number(item.neededG) || null;
-  // 필요 g 가 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
-  const query = neededG ? `${ingredient} ${neededG}g` : ingredient;
+  const neededAmount = Number(item.neededAmount) || null;
+  const neededUnit = item.neededUnit === "ml" ? "ml" : "g"; // 무게 g / 부피 ml
+  // 필요량(무게 g / 부피 ml)이 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
+  const query = neededAmount ? `${ingredient} ${neededAmount}${neededUnit}` : ingredient;
   // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송면) 로켓 필터.
   const params = new URLSearchParams({
     q: query,
@@ -698,15 +699,15 @@ async function searchOneIngredient(item, reusableTabId) {
       let addMode = "direct";
       let quantity = 1;
       let qtyNote = "";
-      if (selected && neededG && selected.amountG) {
-        if (selected.amountG >= neededG) {
-          qtyNote = ` (필요 ${neededG}g ≤ 상품 ${selected.amountG}g → 1개)`;
+      if (selected && neededAmount && selected.amountG) {
+        if (selected.amountG >= neededAmount) {
+          qtyNote = ` (필요 ${neededAmount}${neededUnit} ≤ 상품 ${selected.amountG}${neededUnit} → 1개)`;
         } else {
           addMode = "adjust";
-          quantity = Math.max(1, Math.ceil(neededG / selected.amountG));
-          qtyNote = ` (필요 ${neededG}g / 상품 ${selected.amountG}g → ${quantity}개)`;
+          quantity = Math.max(1, Math.ceil(neededAmount / selected.amountG));
+          qtyNote = ` (필요 ${neededAmount}${neededUnit} / 상품 ${selected.amountG}${neededUnit} → ${quantity}개)`;
         }
-      } else if (selected && neededG && !selected.amountG) {
+      } else if (selected && neededAmount && !selected.amountG) {
         qtyNote = " (상품 용량 미확인 → 1개)";
       }
 

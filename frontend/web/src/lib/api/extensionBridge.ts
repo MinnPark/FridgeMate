@@ -91,7 +91,8 @@ export function searchProductsViaExtension(
   items: Array<{
     ingredient: string;
     quantityText?: string;
-    neededG?: number; // 필요 총량(그램 가정)
+    neededAmount?: number; // 필요 총량(neededUnit 기준)
+    neededUnit?: "g" | "ml"; // 필요 총량 단위 계열(무게 g / 부피 ml)
     preference?: "speed" | "price"; // 정렬 최우선 기준
   }>,
   onProgress?: (p: SearchProgress) => void,
