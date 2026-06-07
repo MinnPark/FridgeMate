@@ -192,7 +192,8 @@ function formatMissingQuantity(
   unit?: string | null,
 ): string {
   if (amount === undefined || amount === null) return unit || "수량 확인 필요";
-  const value = Number.isInteger(amount) ? String(amount) : String(amount);
+  // 소수점이 길게 표시되는 문제 → 정수로 반올림.
+  const value = String(Math.round(amount));
   return `${value}${unit ?? ""}`;
 }
 
@@ -201,7 +202,7 @@ function mapMissingToShoppingItems(
 ): ShoppingItem[] {
   const grouped = new Map<
     string,
-    { quantities: string[]; neededBy: Set<string> }
+    { quantities: string[]; neededBy: Set<string>; totalG: number }
   >();
 
   for (const item of missing) {
@@ -210,9 +211,16 @@ function mapMissingToShoppingItems(
     const current = grouped.get(name) ?? {
       quantities: [],
       neededBy: new Set<string>(),
+      totalG: 0,
     };
     const quantity = formatMissingQuantity(item.amount, item.unit);
     if (!current.quantities.includes(quantity)) current.quantities.push(quantity);
+    // 필요 총량: 단위가 '진짜 g/kg' 일 때만 합산(단위 불명은 수량 매칭 제외 → 1개 담기).
+    const unit = String(item.unit ?? "").toLowerCase().trim();
+    const isGramUnit = unit === "g" || unit === "kg" || unit === "그램" || unit === "킬로";
+    if (typeof item.amount === "number" && Number.isFinite(item.amount) && isGramUnit) {
+      current.totalG += Math.round(item.amount * (unit === "kg" || unit === "킬로" ? 1000 : 1));
+    }
     for (const recipe of item.needed_by ?? []) current.neededBy.add(recipe);
     grouped.set(name, current);
   }
@@ -221,6 +229,7 @@ function mapMissingToShoppingItems(
     name,
     quantity: value.quantities.join(" + "),
     priceKrw: 0,
+    neededG: value.totalG > 0 ? value.totalG : undefined,
     reason:
       value.neededBy.size > 0
         ? `필요 식단: ${Array.from(value.neededBy).join(", ")}`

@@ -161,6 +161,7 @@ export interface ShoppingItem {
   alternativeFor?: string; // 어떤 재료의 대체재인지
   productUrl?: string; // 쿠팡 상품 URL (자동 담기 대상, 없으면 skipped) — mock/API 제공
   score?: ScoreInfo; // 상품 점수 (mock/백엔드 제공)
+  neededG?: number; // 필요 총량(그램 가정). 검색 상품 용량과 비교해 담을 개수 산정용.
 }
 
 export interface ShoppingList {
@@ -249,7 +250,9 @@ export interface CoupangSearchCandidate {
   url: string;
   isAd: boolean;
   isRocket: boolean;
+  isRocketFresh?: boolean; // 로켓프레시(신선도 프록시)
   delivery?: string;
+  amountG?: number | null; // 상품명에서 파싱한 용량(그램 가정). 못 구하면 null.
   score: number;
 }
 
@@ -260,4 +263,7 @@ export interface CoupangProductSearchResult {
   selected: CoupangSearchCandidate | null;
   candidates: CoupangSearchCandidate[];
   message: string;
+  // 선택 상품 용량 vs 필요량으로 산정한 담기 방식/개수.
+  addMode?: "direct" | "adjust";
+  quantity?: number;
 }

@@ -13,7 +13,7 @@ const SETTLE_MS = 1000; // 클릭 후 담기 요청이 서버에 반영될 시�
 const QTY_SETTLE_MS = 1500; // 수량 변경 후 쿠팡이 옵션/가격 재계산하는 동안 대기(담기 전). 1000은 짧아 1개로 담기는 사례 → 1500.
 const CONCURRENCY = 5; // 동시에 처리할 상품 탭 수(속도↑). 너무 크면 쿠팡 봇 의심/리소스 부담.
 const SEARCH_CONCURRENCY = 2;
-const SEARCH_RESULT_LIMIT = 5;
+const SEARCH_RESULT_LIMIT = 24;
 const CART_PAGE_URL = "https://cart.coupang.com/";
 
 // 페이지 컨텍스트에서 실행: 장바구니 담기 버튼만 찾아 클릭.
@@ -141,6 +141,25 @@ function extractSearchCandidatesInPage(limit) {
     const value = Number(digits);
     return Number.isFinite(value) && value > 0 ? value : null;
   };
+  // 상품명에서 용량(그램 가정) 추정: 숫자+단위 × 멀티팩. 못 구하면 null.
+  // (단순화: 모든 단위를 g로 본다. kg/l/리터/킬로만 ×1000.)
+  const parseAmountG = (text) => {
+    const s = String(text || "");
+    // 용량(첫 번째 숫자+단위). "(10g당 …)" 단가 표기는 뒤에 오므로 보통 영향 없음.
+    const m = s.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|l|ml|그램|킬로|리터)/i);
+    if (!m) return null;
+    let v = parseFloat(m[1].replace(",", ""));
+    const u = m[2].toLowerCase();
+    if (u === "kg" || u === "l" || u === "리터" || u === "킬로") v *= 1000;
+    // 수량(팩): "30개", "1통", "2세트", "×3" 등 → 용량 × 수량 = 리스팅 총량.
+    let pack = 1;
+    const pm =
+      s.match(/[x×]\s*(\d+)/) ||
+      s.match(/(\d+)\s*(?:개입|개|통|세트|팩|봉|입|매)/);
+    if (pm) pack = Number(pm[1]) || 1;
+    const total = Math.round(v * pack);
+    return Number.isFinite(total) && total > 0 ? total : null;
+  };
   const firstText = (root, selectors) => {
     for (const selector of selectors) {
       const el = root.querySelector(selector);
@@ -150,36 +169,92 @@ function extractSearchCandidatesInPage(limit) {
     return "";
   };
 
-  const roots = Array.from(
-    document.querySelectorAll(
-      "li[data-product-id], [data-product-id].search-product, li.search-product",
-    ),
-  );
-  const seen = new Set();
-  const candidates = [];
-  for (const root of roots) {
-    const link = root.querySelector('a[href*="/vp/products/"]');
-    const url = absoluteUrl(link && link.getAttribute("href"));
-    if (!url || seen.has(url)) continue;
+  const productId = (url) => {
+    const m = String(url).match(/\/vp\/products\/(\d+)/);
+    return m ? m[1] : null;
+  };
 
-    const name = firstText(root, [
-      ".name",
-      ".search-product-name",
-      "[class*='ProductUnit_productName']",
-      "a[href*='/vp/products/']",
-    ]);
-    const priceText = firstText(root, [
-      ".price-value",
-      ".price strong",
-      "[class*='price-value']",
-      "[class*='Price_price']",
-    ]);
-    const price = parsePrice(priceText);
-    if (!name || !price) continue;
+  // 앵커(/vp/products/ 링크) 기반 추출: 쿠팡 카드 클래스가 바뀌어도 견고.
+  // ⚠️ 같은 상품ID라도 1kg/3kg/5kg 는 vendorItemId 가 다른 '별도 옵션 카드'다.
+  //    이름과 URL(옵션)이 어긋나면 안 되므로 옵션(vendorItemId)별로 따로 후보를 만든다.
+  //    옵션이 박힌 href 라야 검색에서 본 그 옵션이 그대로 담긴다(아니면 상품 기본옵션이 담김).
+  const optionId = (href) => {
+    const v = String(href || "").match(/[?&]vendorItemId=(\d+)/);
+    if (v) return "v" + v[1];
+    const i = String(href || "").match(/[?&]itemId=(\d+)/);
+    return i ? "i" + i[1] : null;
+  };
+  const anchors = Array.from(
+    document.querySelectorAll('a[href*="/vp/products/"]'),
+  );
+  // 옵션 앵커가 하나라도 있는 상품ID 집계 → 그런 상품은 옵션 없는 앵커를 무시(기본옵션 담김 방지).
+  const optionedPids = new Set();
+  for (const link of anchors) {
+    const href = link.getAttribute("href") || "";
+    if (optionId(href)) {
+      const pid = productId(absoluteUrl(href));
+      if (pid) optionedPids.add(pid);
+    }
+  }
+
+  const byKey = new Map();
+  const order = [];
+  for (const link of anchors) {
+    const href = link.getAttribute("href") || "";
+    const url = absoluteUrl(href);
+    const pid = productId(url);
+    if (!url || !pid) continue;
+    const opt = optionId(href);
+    // 옵션 카드가 존재하는 상품은 '옵션 앵커'만 사용(이름↔옵션 일치 보장).
+    if (optionedPids.has(pid) && !opt) continue;
+    const key = opt ? `${pid}:${opt}` : `${pid}`;
+    if (byKey.has(key)) continue;
+    if (order.length >= limit) continue;
+
+    const root =
+      link.closest("li, [data-product-id], .search-product") ||
+      link.parentElement ||
+      link;
+
+    let name = (link.innerText || link.textContent || "").trim();
+    if (!name) name = (link.getAttribute("title") || "").trim();
+    if (!name) {
+      const img = root.querySelector("img");
+      name = img ? (img.getAttribute("alt") || "").trim() : "";
+    }
+    if (!name)
+      name = firstText(root, [
+        ".name",
+        ".search-product-name",
+        "[class*='productName']",
+        "[class*='ProductUnit']",
+      ]);
+    if (!name) name = (root.innerText || root.textContent || "").trim().slice(0, 80);
+    if (!name) continue;
 
     const allText = (root.innerText || root.textContent || "").trim();
+    let price = parsePrice(
+      firstText(root, [
+        ".price-value",
+        ".price strong",
+        "[class*='price-value']",
+        "[class*='Price_price']",
+      ]),
+    );
+    if (!price) {
+      const pm = allText.match(/([\d,]{2,})\s*원/);
+      price = pm ? parsePrice(pm[1]) : null;
+    }
     const isAd = /광고|AD\b/i.test(allText);
-    const isRocket = /로켓배송|로켓프레시|로켓와우/.test(allText);
+    // 로켓 배지는 텍스트가 아니라 이미지/아이콘인 경우가 많아 img(alt/src)·class 도 확인.
+    const rocketEl = root.querySelector(
+      "img[alt*='로켓'], img[src*='rocket' i], [class*='rocket' i]",
+    );
+    const freshEl = root.querySelector(
+      "img[alt*='프레시'], img[src*='fresh' i], [class*='fresh' i]",
+    );
+    const isRocket = /로켓/.test(allText) || !!rocketEl;
+    const isRocketFresh = /로켓\s*프레시/.test(allText) || !!freshEl;
     const delivery = firstText(root, [
       ".arrival-info",
       ".delivery",
@@ -187,10 +262,20 @@ function extractSearchCandidatesInPage(limit) {
       "[class*='Delivery']",
     ]);
 
-    seen.add(url);
-    candidates.push({ name, price, url, isAd, isRocket, delivery });
-    if (candidates.length >= limit) break;
+    byKey.set(key, {
+      name,
+      price: price || 0,
+      url, // 옵션 앵커의 href(vendorItemId 포함) → 담기 시 이 옵션 그대로.
+      isAd,
+      isRocket,
+      isRocketFresh,
+      // 용량은 카드 전체 텍스트에서 파싱(상품명 앵커가 제목만일 때도 "150g, 1개" 등 확보).
+      amountG: parseAmountG(allText) ?? parseAmountG(name),
+      delivery,
+    });
+    order.push(key);
   }
+  const candidates = order.map((key) => byKey.get(key));
   return {
     candidates,
     pageTitle: document.title,
@@ -204,51 +289,123 @@ function normalizeSearchText(value) {
   return String(value || "").toLowerCase().replace(/\s+/g, "");
 }
 
-function rankSearchCandidates(ingredient, candidates) {
+// 선호(preference)에 따른 단일 최우선 정렬(가중치 혼합 아님).
+//  - price/nutrition/기본 → 최저가
+//  - speed → 로켓 상품 먼저, 그 안에서 최저가
+//  - freshness → 로켓프레시 먼저, 그다음 로켓, 그 안에서 최저가
+// 단, 항상 (1) 재료명 관련성, (2) 광고 여부를 앞 기준으로 둔다(엉뚱/광고 상품 방지).
+function rankSearchCandidates(ingredient, candidates, preference, neededG) {
   const needle = normalizeSearchText(ingredient);
-  return candidates
-    .map((candidate) => {
-      const haystack = normalizeSearchText(candidate.name);
-      let score = 0;
-      if (haystack.includes(needle)) score += 100;
-      for (const token of String(ingredient || "").split(/\s+/).filter(Boolean)) {
-        if (haystack.includes(normalizeSearchText(token))) score += 20;
+  const tokens = String(ingredient || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(normalizeSearchText);
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const boundaryRe = needle ? new RegExp(esc(needle) + "(?![가-힣])") : null;
+  // 가공형 접미사 — 재료명에 없을 때만 강등(예: 생강 vs 생강차/생강즙. 단 고춧'가루'는 재료명에 있어 제외).
+  const PROCESSED = [
+    "차", "청", "즙", "환", "진액", "엑기스", "농축", "정과", "절임", "장아찌",
+    "캔디", "사탕", "시럽", "페이스트", "티백", "음료", "스틱", "식초", "분말", "가루",
+  ];
+  const isProcessed = (hay) =>
+    PROCESSED.some((w) => hay.includes(w) && !needle.includes(w));
+  const relevance = (name) => {
+    const hay = normalizeSearchText(name);
+    let base;
+    if (needle && hay.includes(needle)) {
+      // 재료명 뒤에 한글이 또 붙으면(생강'차') 약하게, 단어 경계로 끝나면(흙생강) 강하게.
+      base = boundaryRe && boundaryRe.test(hay) ? 3 : 2;
+    } else {
+      // bigram 겹침 — 어순/접미사 차이("마늘다진것"↔"다진마늘") 대응.
+      let hits = 0;
+      for (let i = 0; needle && i + 2 <= needle.length; i++) {
+        if (hay.includes(needle.slice(i, i + 2))) hits++;
       }
-      if (candidate.isRocket) score += 8;
-      if (candidate.isAd) score -= 15;
-      score -= Math.min(candidate.price / 10000, 20);
-      return { ...candidate, score: Math.round(score * 100) / 100 };
-    })
-    .sort((a, b) => b.score - a.score || a.price - b.price);
+      base = hits >= 2 ? 2 : hits === 1 || tokens.some((t) => t && hay.includes(t)) ? 1 : 0;
+    }
+    if (base > 0 && isProcessed(hay)) base = Math.max(0, base - 2); // 가공형 강등
+    return base;
+  };
+  // 쿠팡이 이미 '낮은 가격순(salePriceAsc)'으로 정렬해 주므로 우리는 재정렬하지 않는다.
+  //  (1) 관련 있는 것만(가공품/광고/무관 제거) (2) 빠른배송이면 로켓만 (3) 쿠팡 순서(=최저가) 유지.
+  let list = candidates.map((c, i) => ({ ...c, score: relevance(c.name), _i: i }));
+  const relevant = list.filter((c) => c.score > 0 && !c.isAd);
+  if (relevant.length) list = relevant; // 관련 상품이 하나도 없으면 폴백으로 전체 유지
+  if (preference === "speed") {
+    const rocket = list.filter((c) => c.isRocket);
+    if (rocket.length) list = rocket; // 로켓 없으면 폴백
+  } else if (preference === "freshness") {
+    const fresh = list.filter((c) => c.isRocketFresh);
+    if (fresh.length) list = fresh;
+  }
+  // 관련성 높은 순 → 쿠팡 원래 순서(낮은 가격순) 유지(stable sort).
+  return list.sort((a, b) => b.score - a.score || a._i - b._i);
 }
 
 async function searchOneIngredient(item) {
   const ingredient = item.ingredient;
-  // 필요량(예: 270g)은 실제 판매 단위와 다를 수 있어 검색어를 과도하게 제한한다.
-  // 후보 수집은 재료명 하나로 하고, 필요량은 후속 상품/구매수량 판단에 사용한다.
-  const query = ingredient;
-  const searchUrl = `https://www.coupang.com/np/search?q=${encodeURIComponent(query)}`;
+  const neededG = Number(item.neededG) || null;
+  // 필요 g 가 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
+  const query = neededG ? `${ingredient} ${neededG}g` : ingredient;
+  // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송/신선도면) 로켓 필터.
+  const params = new URLSearchParams({
+    q: query,
+    channel: "user",
+    listSize: "36",
+    sorter: "salePriceAsc",
+  });
+  if (item.preference === "speed" || item.preference === "freshness") {
+    params.set("filterType", "rocket_luxury,rocket_wow,coupang_global");
+    params.set("rocketAll", "true");
+  }
+  const searchUrl = `https://www.coupang.com/np/search?${params.toString()}`;
   let tab;
   try {
     tab = await chrome.tabs.create({ url: searchUrl, active: false });
     await waitForTabComplete(tab.id);
-    await delay(900);
+    await delay(1500); // 검색 결과 비동기 렌더 여유.
     const injected = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractSearchCandidatesInPage,
       args: [SEARCH_RESULT_LIMIT],
     });
     const result = injected && injected[0] && injected[0].result;
-    const candidates = rankSearchCandidates(ingredient, result?.candidates || []);
+    const candidates = rankSearchCandidates(
+      ingredient,
+      result?.candidates || [],
+      item.preference,
+      neededG,
+    );
     const selected = candidates[0] || null;
+
+    // 필요량(그램 가정) vs 상품 용량 → 담을 개수/방식 산정.
+    let addMode = "direct";
+    let quantity = 1;
+    let qtyNote = "";
+    if (selected && neededG && selected.amountG) {
+      if (selected.amountG >= neededG) {
+        addMode = "direct";
+        quantity = 1;
+        qtyNote = ` (필요 ${neededG}g ≤ 상품 ${selected.amountG}g → 1개)`;
+      } else {
+        addMode = "adjust";
+        quantity = Math.max(1, Math.ceil(neededG / selected.amountG));
+        qtyNote = ` (필요 ${neededG}g / 상품 ${selected.amountG}g → ${quantity}개)`;
+      }
+    } else if (selected && neededG && !selected.amountG) {
+      qtyNote = " (상품 용량 미확인 → 1개)";
+    }
+
     return {
       ingredient,
       status: selected ? "success" : result?.blocked ? "blocked" : "notfound",
       searchUrl,
       selected,
       candidates,
+      addMode,
+      quantity,
       message: selected
-        ? `${candidates.length}개 후보 중 상품을 선택했습니다.`
+        ? `상품을 선택했습니다.${qtyNote}`
         : result?.blocked
           ? "쿠팡이 검색 페이지 접근을 제한했습니다. 잠시 후 다시 시도해 주세요."
           : "검색 결과에서 상품 정보를 찾지 못했습니다.",
