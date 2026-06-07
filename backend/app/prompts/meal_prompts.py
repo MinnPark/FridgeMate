@@ -7,7 +7,12 @@ MEAL_PLAN_PROMPT = """
 2. priority_items가 포함된 끼니는 usesPriorityItem: true 표시
 3. selected_recipes 목록에서 recipeTitle을 선택
 4. 3일 × 3끼(아침/점심/저녁) 구성
-5. 반드시 아래 JSON 형식만 반환 (설명 텍스트 금지)
+5. 9개 레시피를 9개 슬롯에 각각 1번씩만 배치 (중복 사용 금지)
+6. 슬롯별 칼로리 배치 기준을 반드시 준수:
+   - 아침: morning_recipes 목록에서 선택 (칼로리 낮은 것 → 소화 쉽고 가벼운 것)
+   - 점심: lunch_recipes 목록에서 선택 (칼로리 높은 것 → 하루 중 가장 활동량 많은 시간대)
+   - 저녁: dinner_recipes 목록에서 선택 (칼로리 중간 → 과식 방지)
+7. 반드시 아래 JSON 형식만 반환 (설명 텍스트 금지)
 
 {
   "note": "임박 재료를 앞쪽 일자에 배치했어요.",

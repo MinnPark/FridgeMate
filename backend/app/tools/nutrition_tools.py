@@ -61,40 +61,46 @@ def _build_message(passed: bool, totals: dict, targets: dict) -> str:
 def verify_nutrition_goal(
     recipes: list[dict[str, Any]],
     goal: dict[str, Any],
+    num_days: int = 3,                          # ← 추가 (기본값 3일)
 ) -> dict[str, Any]:
     """
-    selected_recipes 영양 합산 → 목표 대비 검증 결과 반환.
+    selected_recipes 영양 합산 → 일 평균 → 목표 대비 검증 결과 반환.
 
     입력:
-      recipes: selected_recipes (integration.to_contract 계약 형태)
-               recipe["nutrition"] = {"calories", "protein", "carbs", "fat"}
-               → ChromaDB recipe_db 에 이미 포함된 값 (외부 API 불필요)
-      goal:    state["nutrition_goal"]
-               {"protein_target": 120, "calorie_target": 1700,
-                "carbs_target": 150,   "fat_target": 55}
+      recipes:  selected_recipes (9개 = 3일 × 3끼)
+      goal:     state["nutrition_goal"] (하루 기준 목표값)
+      num_days: 식단 일수 (기본 3일)
+
+    계산 방식:
+      1. 9개 레시피 전체 합산
+      2. num_days(3)로 나눠 하루 평균 계산
+      3. 하루 목표값과 비교
 
     출력 (mock.ts NutritionResult 계약):
       {
-        "protein":  {"current": 115, "target": 120, "unit": "g"},
-        "calories": {"current": 1210, "target": 1700, "unit": "kcal"},
-        "carbs":    {"current": 58,  "target": 150,  "unit": "g"},
-        "fat":      {"current": 48,  "target": 55,   "unit": "g"},
-        "passed":   False,
-        "message":  "목표 영양소를 충족하지 못했어요. 아래 경고를 확인해 주세요.",
-        "warnings": ["칼로리가 목표(1700kcal) 대비 부족해요."],
+        "protein":  {"current": 115, "target": 120, "unit": "g"},   ← 하루 평균
+        "calories": {"current": 1650, "target": 1700, "unit": "kcal"},
+        ...
       }
     """
-    # 1. selected_recipes["nutrition"] 직접 합산
-    #    ChromaDB → integration.to_contract() 가 이미 carbs, fat 변환 완료
-    totals = {
-        "calories": round(sum(r.get("nutrition", {}).get("calories", 0) for r in recipes)),
-        "protein":  round(sum(r.get("nutrition", {}).get("protein",  0) for r in recipes)),
-        "carbs":    round(sum(r.get("nutrition", {}).get("carbs",    0) for r in recipes)),
-        "fat":      round(sum(r.get("nutrition", {}).get("fat",      0) for r in recipes)),
+    # 1. 9개 레시피 전체 합산
+    total_sum = {
+        "calories": sum(r.get("nutrition", {}).get("calories", 0) for r in recipes),
+        "protein":  sum(r.get("nutrition", {}).get("protein",  0) for r in recipes),
+        "carbs":    sum(r.get("nutrition", {}).get("carbs",    0) for r in recipes),
+        "fat":      sum(r.get("nutrition", {}).get("fat",      0) for r in recipes),
     }
 
-    # 2. 목표값 추출
-    #    protein_target / protein_min 둘 다 허용 (기존 meal_agent 호환)
+    # 2. 하루 평균 계산 (÷ num_days)              ← 핵심 변경
+    days = max(num_days, 1)                       # 0 나누기 방지
+    totals = {
+        "calories": round(total_sum["calories"] / days),
+        "protein":  round(total_sum["protein"]  / days),
+        "carbs":    round(total_sum["carbs"]     / days),
+        "fat":      round(total_sum["fat"]       / days),
+    }
+
+    # 3. 목표값 추출 (하루 기준 그대로 사용)
     targets = {
         "protein":  goal.get("protein_target",  goal.get("protein_min",  40)),
         "calories": goal.get("calorie_target",  goal.get("calorie_min",  1500)),
@@ -102,19 +108,18 @@ def verify_nutrition_goal(
         "fat":      goal.get("fat_target",      55),
     }
 
-    # 3. passed 판정
-    #    단백질 목표 달성 + 칼로리 ±10% 범위 내
+    # 4. passed 판정 (하루 평균 vs 하루 목표)
     passed = (
         totals["protein"]  >= targets["protein"]
         and totals["calories"] >= targets["calories"] * 0.9
         and totals["calories"] <= targets["calories"] * 1.1
     )
 
-    # 4. warnings / message 생성
+    # 5. warnings / message 생성
     warnings = _build_warnings(totals, targets)
     message  = _build_message(passed, totals, targets)
 
-    # 5. mock.ts NutritionResult 계약 형태로 반환
+    # 6. mock.ts NutritionResult 계약 형태로 반환
     return {
         "protein":  {"current": totals["protein"],  "target": targets["protein"],  "unit": "g"},
         "calories": {"current": totals["calories"], "target": targets["calories"], "unit": "kcal"},

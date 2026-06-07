@@ -1,6 +1,7 @@
 # recipe_agent.py 개발 문서
 
 > 작성일: 2026-06-06  
+> 최종 수정일: 2026-06-07  
 > 작성자: 전영주
 > 관련 파일: `app/agents/recipe_agent.py`
 
@@ -32,6 +33,7 @@ recipe_agent(state)
     ├─ pantry_items 없음?  →  조기 반환 (selected_recipes: [])
     │
     ├─ 1. _build_query(state)
+    │       ├─ excluded_ingredients 를 pantry_items 에서 먼저 제거 (26-06-07 21:00 수정)
     │       └─ priority(high) 재료 + user_input 결합 → 검색 쿼리
     │
     ├─ 2. retrieve_recipes(query, state)          ← integration.py
@@ -40,12 +42,17 @@ recipe_agent(state)
     │       ├─ search_sync(query, strategy=...)   ← ChromaDB 실검색
     │       └─ state["recipe_search_trace"] 자동 설정 (부수효과)
     │
-    ├─ 3. results[:3]  →  상위 3개 선택
+    ├─ 3. _filter_excluded(results, excluded_str)  ← 제외 재료 필터링 (신규)
+    │       ├─ ingredients 필드 정확한 이름 매칭
+    │       ├─ 레시피 이름 부분 포함 검사
+    │       └─ 필터 후 0개 → fallback(원본 반환)
     │
-    ├─ 4. priority_items_used 추적
+    ├─ 4. filtered[:9]  →  상위 9개 선택
+    │
+    ├─ 5. priority_items_used 추적
     │       └─ 임박 재료 중 실제 레시피에 포함된 것만 기록
     │
-    └─ 5. append_log() → state["logs"] 업데이트
+    └─ 6. append_log() → state["logs"] 업데이트
 ```
 
 ---
@@ -92,32 +99,34 @@ recipe_agent(state)
 **역할**: `pantry_items` + `user_input`을 결합해 RAG 검색 쿼리를 만든다.
 
 **우선순위 규칙**:
-1. `expiry_priority == "high"` 재료를 **앞에** 배치 (유통기한 임박 재료 우선 소비)
-2. `high` 재료가 없으면 **전체** 재료 이름 사용
-3. `user_input`을 **뒤에** 결합
-4. 둘 다 없으면 **빈 문자열** 반환
+1. `excluded_ingredients` 를 `pantry_items` 에서 **먼저 제거** ← 변경
+2. `expiry_priority == "high"` 재료를 **앞에** 배치 (유통기한 임박 재료 우선 소비)
+3. `high` 재료가 없으면 **전체** 재료 이름 사용
+4. `user_input`을 **뒤에** 결합
+5. 둘 다 없으면 **빈 문자열** 반환
 
 **단계별 예시**:
 
-#### 케이스 1: priority 재료 있음 (오늘: 2026-06-06)
+#### 케이스 1: priority 재료 있음 + excluded 있음 (오늘: 2026-06-07)
 
 ```
 입력 pantry_items:
-  닭가슴살  expiry_priority="normal"  (2026-06-10, D+4)
-  계란      expiry_priority="high"    (2026-06-07, D+1)  ← 임박
-  브로콜리  expiry_priority="high"    (2026-06-08, D+2)  ← 임박
-  두부      expiry_priority="high"    (2026-06-06, D+0)  ← 임박
+  닭가슴살  expiry_priority="normal"  (2026-06-10, D+3)
+  계란      expiry_priority="high"    (2026-06-08, D+1)  ← 임박
+  브로콜리  expiry_priority="high"    (2026-06-09, D+2)  ← 임박
+  두부      expiry_priority="high"    (2026-06-07, D+0)  ← 임박
 
-입력 user_input:
-  "냉장고에 닭가슴살, 계란, 브로콜리, 두부 있어. 고단백 저탄수. 2인분... 식단 짜줘"
+입력 excluded_ingredients: "닭가슴살"
 
 처리 과정:
-  priority_names = ["계란", "브로콜리", "두부"]   ← high 재료만
+  excluded_names   = {"닭가슴살"}
+  filtered_pantry  = [계란, 브로콜리, 두부]   ← 닭가슴살 제거
+  priority_names   = ["계란", "브로콜리", "두부"]
   parts = ["계란 브로콜리 두부", "냉장고에 ..."]
 
 생성된 쿼리:
-  "계란 브로콜리 두부 냉장고에 닭가슴살, 계란, 브로콜리, 두부 있어. 고단백 저탄수. 2인분... 식단 짜줘"
-  → 공백제거 길이: 50자+ → RAG-Fusion 선택
+  "계란 브로콜리 두부 냉장고에 계란, 브로콜리, 두부 있어. 고단백 저탄수. ..."
+  ← 닭가슴살 없음 → RAG가 닭가슴살 레시피 가져오지 않음 ✅
 ```
 
 #### 케이스 2: priority 재료 없음 (전체 폴백)
@@ -155,7 +164,39 @@ recipe_agent(state)
 
 ---
 
-### 3-3. `recipe_agent(state: FridgeMateState) -> FridgeMateState`
+### 3-3. `_filter_excluded(recipes, excluded_str) -> list[dict]` ← 신규
+
+**역할**: `excluded_ingredients`에 포함된 재료가 들어간 레시피를 제거한다.
+
+**제외 판단 기준 (둘 중 하나라도 해당하면 제외)**:
+
+| 검사 대상 | 방식 | 예시 |
+|-----------|------|------|
+| `ingredients` 필드 | 정확한 이름 매칭 | `{"name": "닭가슴살"}` → 제외 |
+| 레시피 이름 | 부분 포함 검사 | `"닭가슴살 두부선"` → 제외 |
+
+**규칙**:
+- 쉼표(`,`) 구분으로 복수 재료 처리
+- 필터 후 결과 0개면 필터 미적용 → 원본 반환 (fallback)
+- `excluded_str` 비어있으면 원본 그대로 반환
+
+**예시**:
+
+```
+excluded_str = "닭가슴살"
+
+레시피 목록:
+  "닭가슴살 두부선"              → name에 "닭가슴살" 포함 → 제외 ✅
+  "닭가슴살 브로콜리 만두"        → name에 "닭가슴살" 포함 → 제외 ✅
+  "닭가슴살호두크로켓"            → name + ingredients 모두 해당 → 제외 ✅
+  "구운 닭고기 샐러드"           → ingredients에 "닭가슴살" 포함 → 제외 ✅
+  "두부오믈렛"                   → 해당 없음 → 유지 ✅
+  "브로콜리 계란볶음"             → 해당 없음 → 유지 ✅
+```
+
+---
+
+### 3-4. `recipe_agent(state: FridgeMateState) -> FridgeMateState`
 
 **역할**: 전체 레시피 검색 파이프라인을 실행하는 메인 함수.
 
@@ -165,13 +206,14 @@ recipe_agent(state)
 |------|------|------|------|
 | `pantry_items` | `list[dict]` | `pantry_agent` | 재료 + expiry_priority 포함 |
 | `user_input` | `str` | `main.py ChatRequest.message` | `chatAdapter.ts`가 생성한 자연어 |
+| `excluded_ingredients` | `str` | `main.py ChatRequest` | 제외할 재료 ("닭가슴살,돼지고기" 형식) ← 신규 |
 | `logs` | `list[dict]` | `pantry_agent` | 기존 파이프라인 로그 |
 
 #### Output (state 필드)
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `selected_recipes` | `list[dict]` | 상위 3개 레시피 (BackendRecipe 계약) |
+| `selected_recipes` | `list[dict]` | 상위 9개 레시피 (BackendRecipe 계약) ← 3→9 변경 |
 | `recipe_search_trace` | `dict` | 검색 전략/결과 메타데이터 |
 | `logs` | `list[dict]` | 파이프라인 로그 추가 |
 
@@ -208,10 +250,10 @@ recipe_agent(state)
   "strategy": "RAG-Fusion",
   "original_query": "계란 브로콜리 두부 냉장고에...",
   "cache_hit": false,
-  "n_results": 3,
+  "n_results": 9,
   "via": "rag_fusion",
   "embedder": "local/bge-m3",
-  "top": ["두부 계란국", "브로콜리 달걀볶음", "순두부찌개"]
+  "top": ["두부 계란국", "브로콜리 달걀볶음", "순두부찌개", "..."]
 }
 ```
 
@@ -224,7 +266,8 @@ recipe_agent(state)
   "result": {
     "strategy": "RAG-Fusion",
     "original_query": "계란 브로콜리 두부...",
-    "recipes_found": 3,
+    "recipes_found": 9,
+    "excluded": "닭가슴살",
     "priority_items_used": ["계란", "두부"]
   }
 }
@@ -238,6 +281,7 @@ recipe_agent(state)
 |--------|------|
 | `pantry_items` 없음 | 조기 반환. `selected_recipes=[]`, `log.event="skipped"` |
 | ChromaDB 연결 실패 등 예외 | `selected_recipes=[]`, `log.event="rag_retrieval_failed"`, `error=str(e)` |
+| `_filter_excluded` 후 0개 | 필터 미적용 → 원본 반환 (fallback) |
 
 ---
 
@@ -249,8 +293,8 @@ recipe_agent.py
     │       └── hyde_query_length_threshold = 10
     │
     ├── app.graph.state.FridgeMateState
-    │       └── pantry_items, user_input, logs, selected_recipes,
-    │           recipe_search_trace
+    │       └── pantry_items, user_input, excluded_ingredients,
+    │           logs, selected_recipes, recipe_search_trace
     │
     ├── app.rag.integration.retrieve_recipes()
     │       ├── _resolve_strategy()
@@ -274,9 +318,10 @@ recipe_agent.py
 | `app/rag/hyde.py` | HyDE 검색 구현 |
 | `app/rag/rag_fusion.py` | RAG-Fusion + RRF 병합 구현 |
 | `app/rag/retriever.py` | ChromaDB 기본 검색 |
-| `app/graph/state.py` | `FridgeMateState` TypedDict 정의 |
+| `app/graph/state.py` | `FridgeMateState` TypedDict 정의 (`excluded_ingredients` 필드 포함) |
 | `app/config.py` | `hyde_query_length_threshold = 10` |
-| `frontend/.../chatAdapter.ts` | `BackendRecipe` 계약 소비 |
+| `app/main.py` | `ChatRequest.excluded_ingredients` 수신 → state 저장 |
+| `frontend/.../chatAdapter.ts` | `excluded_ingredients` 전달 + ingredients에서 제외 재료 제거 |
 
 ---
 
@@ -297,5 +342,11 @@ python tests/test_recipe_agent.py
 | 3 | `_build_query()` priority 재료 있음 | 쿼리 앞부분에 priority 재료 포함 |
 | 4 | `_build_query()` priority 재료 없음 | 전체 재료 이름 포함 |
 | 5 | `_build_query()` pantry 없음 | `user_input` 그대로 반환 |
-| 6 | `recipe_agent()` 정상 실행 | 레시피 1~3개 + 계약 키 통과 |
-| 7 | `recipe_agent()` 조기 반환 | `selected_recipes=[]` + `log.event=
+| 6 | `_build_query()` excluded 있음 | 쿼리에 excluded 재료 미포함 |
+| 7 | `recipe_agent()` 정상 실행 | 레시피 1~9개 + 계약 키 통과 |
+| 8 | `recipe_agent()` 조기 반환 | `selected_recipes=[]` + `log.event="skipped"` |
+| 9 | `_filter_excluded()` 정상 케이스 | 닭가슴살 포함 레시피 제외 |
+| 10 | `_filter_excluded()` 복수 재료 | 2개 재료 모두 필터링 |
+| 11 | `_filter_excluded()` 결과 0개 | fallback으로 원본 반환 |
+| 12 | `_filter_excluded()` 빈 문자열 | 필터링 없이 원본 반환 |
+| 13 | `_filter_excluded()` 레시피 이름 검사 | "닭가슴살 두부선" → 제외 |
