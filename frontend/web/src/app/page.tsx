@@ -273,6 +273,7 @@ export default function HomePage() {
               <CartExecutionCard
                 shopping={result!.shopping}
                 onStatusChange={setCartStatus}
+                deliveryPreference={request.deliveryPreference}
               />
             </div>
           ) : (

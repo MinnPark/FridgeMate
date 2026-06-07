@@ -86,7 +86,12 @@ export function executeViaExtension(
 
 /** 쿠팡 검색 결과를 확장에서 읽어 상품 후보와 자동 선택 결과를 받는다. */
 export function searchProductsViaExtension(
-  items: Array<{ ingredient: string; quantityText?: string }>,
+  items: Array<{
+    ingredient: string;
+    quantityText?: string;
+    neededG?: number; // 필요 총량(그램 가정)
+    preference?: "speed" | "freshness" | "price" | "nutrition"; // 정렬 최우선 기준
+  }>,
   onProgress?: (p: SearchProgress) => void,
 ): Promise<CoupangProductSearchResult[]> {
   return new Promise((resolve, reject) => {

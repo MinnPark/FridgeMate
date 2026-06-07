@@ -20,6 +20,7 @@ import type {
   CartExecuteItem,
   CartExecuteResponse,
   CoupangProductSearchResult,
+  DeliveryPreference,
   ShoppingList,
 } from "@/lib/api/types";
 import { MOCK_CART_LINKS } from "@/lib/api/coupangMockLinks";
@@ -35,12 +36,18 @@ interface Props {
   shopping: ShoppingList;
   // 실제 담기 실행 상태를 상위(Agent Pipeline의 Executor 단계)로 알린다.
   onStatusChange?: (status: "running" | "completed" | "failed") => void;
+  // 검색 결과 정렬 최우선 기준(조건 바의 배송 선호).
+  deliveryPreference?: DeliveryPreference;
 }
 
 // 부족 재료 장보기 + 쿠팡 실행부 통합 카드.
 // 좌: 부족 재료 요약 / 우: 분석 → 검색 URL 생성(자동) → 장바구니 담기(수동) 진행 상태.
 // 자동 담기는 Chrome 확장으로 실행한다(결제 없음).
-export function CartExecutionCard({ shopping, onStatusChange }: Props) {
+export function CartExecutionCard({
+  shopping,
+  onStatusChange,
+  deliveryPreference,
+}: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [exec, setExec] = useState<CartExecuteResponse | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
@@ -80,6 +87,10 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
       .filter((result) => result.selected)
       .map((result) => [result.ingredient, result.selected!]),
   );
+  // 재료명 → 검색 결과(수량/방식 포함).
+  const resultByIngredient = new Map(
+    searchResults.map((result) => [result.ingredient, result]),
+  );
   // 체크된(구매할) 재료만 검색·담기 대상.
   const pickedItems = shopping.items.filter((item) => picked.has(item.name));
   const allPicked = hasItems && pickedItems.length === shopping.items.length;
@@ -117,13 +128,18 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
     searchedTotal <= shopping.budgetKrw;
 
   function buildExecItems(): CartExecuteItem[] {
-    return pickedItems.map((item) => ({
-      ingredient: item.name,
-      productUrl: item.productUrl || selectedByIngredient.get(item.name)?.url,
-      searchUrl:
-        item.productUrl || selectedByIngredient.has(item.name) ? undefined : searchUrl,
-      quantity: 1,
-    }));
+    return pickedItems.map((item) => {
+      const r = resultByIngredient.get(item.name);
+      return {
+        ingredient: item.name,
+        productUrl: item.productUrl || r?.selected?.url,
+        searchUrl:
+          item.productUrl || r?.selected ? undefined : searchUrl,
+        // 검색에서 산정한 담을 개수/방식(필요량 vs 상품 용량). 없으면 1개 direct.
+        quantity: r?.quantity ?? 1,
+        addMode: r?.addMode ?? "direct",
+      };
+    });
   }
 
   const step3State: StepState =
@@ -162,6 +178,8 @@ export function CartExecutionCard({ shopping, onStatusChange }: Props) {
         missing.map((item) => ({
           ingredient: item.name,
           quantityText: item.quantity,
+          neededG: item.neededG,
+          preference: deliveryPreference,
         })),
         (p: SearchProgress) => {
           setProgress((prev) => {
