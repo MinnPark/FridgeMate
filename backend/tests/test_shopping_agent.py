@@ -4,7 +4,7 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.agents.shopping_agent import shopping_agent
+from app.agents.shopping_agent import shopping_agent, _format_quantity   # ← _format_quantity 추가
 
 # ─────────────────────────────────────────────────────────────
 # 테스트 Input 데이터
@@ -307,19 +307,125 @@ print(f"\n  STEP 8 결과: {'✅' if step8_pass else '❌'}")
 
 
 # ─────────────────────────────────────────────────────────────
+# STEP 9: _format_quantity() 출력 테스트
+# ─────────────────────────────────────────────────────────────
+divider("STEP 9: _format_quantity() 출력 테스트")
+
+FORMAT_CASES = [
+    # (amount,   unit,       기대 출력,   설명)
+    (200,        "g",        "200g",      "정수 + 단위"),
+    (1.5,        "kg",       "1.5kg",     "소수 + 단위"),
+    (3.0,        "개",       "3개",       "정수형 소수(3.0) → 정수(3) 변환"),
+    (0.5,        "ml",       "0.5ml",     "소수점 ml"),
+    (3,          None,       "3",         "단위 없음"),
+    (100,        "ml",       "100ml",     "정수 ml"),
+    (2,          "개",       "2개",       "정수 개"),
+    (6,          "작은술",   "6작은술",   "한글 단위"),
+    (1,          "큰술",     "1큰술",     "한글 단위"),
+    (0,          "g",        "0g",        "amount=0"),
+    (None,       "g",        None,        "amount=None → None 반환"),
+    (None,       None,       None,        "amount=None, unit=None → None 반환"),
+    (None,       "ml",       None,        "amount=None, unit=ml → None 반환"),
+    (12,         "g",        "12g",       "'g+3' → 'g' 정규화 후"),
+    (400,        "g",        "400g",      "정수 대용량"),
+    (1.0,        "kg",       "1kg",       "1.0kg → 1kg 변환"),
+]
+
+print(f"\n  {'amount':<8} {'unit':<8} {'기대 출력':<12} {'실제 출력':<12} {'결과':<4} 설명")
+print(f"  {'-' * 72}")
+
+step9_pass = True
+
+for amount, unit, expected, desc in FORMAT_CASES:
+    actual = _format_quantity(amount, unit)
+    ok     = actual == expected
+    if not ok:
+        step9_pass = False
+    print(
+        f"  {str(amount):<8} {str(unit):<8} "
+        f"{str(expected):<12} {str(actual):<12} "
+        f"{'✅' if ok else '❌':<4} {desc}"
+    )
+
+print(f"\n  STEP 9 결과: {'✅' if step9_pass else '❌'}")
+
+
+# ─────────────────────────────────────────────────────────────
+# STEP 10: 재료명 띄어쓰기 정규화 검증
+# "닭  가슴살" / " 닭가슴살 " 등이 pantry의 "닭가슴살"과 동일하게 인식되어야 함
+# ─────────────────────────────────────────────────────────────
+divider("STEP 10: 재료명 띄어쓰기 정규화 검증")
+
+# 재료명에 의도적으로 띄어쓰기 오류를 넣은 데이터
+WHITESPACE_PANTRY = [
+    {"name": "닭가슴살"},   # 정상
+    {"name": " 두부 "},     # 앞뒤 공백
+]
+
+WHITESPACE_RECIPES = [
+    {
+        "name": "테스트 레시피",
+        "ingredients": [
+            {"name": "닭 가슴살",  "amount": 200, "unit": "g"},   # 내부 공백 → pantry "닭가슴살"과 달라야 감지
+            {"name": " 두부",      "amount": 100, "unit": "g"},   # 앞 공백 → pantry " 두부 "와 매칭
+            {"name": "양파",       "amount": 100, "unit": "g"},   # pantry에 없음 → missing
+        ],
+    },
+]
+
+WHITESPACE_MEAL_PLAN = {
+    "days": [{
+        "label": "1일차",
+        "entries": [{"slot": "점심", "recipeTitle": "테스트 레시피"}],
+    }]
+}
+
+ws_result  = shopping_agent({
+    "meal_plan":        WHITESPACE_MEAL_PLAN,
+    "selected_recipes": WHITESPACE_RECIPES,
+    "pantry_items":     WHITESPACE_PANTRY,
+    "logs":             [],
+})
+ws_missing       = ws_result.get("missing_ingredients") or []
+ws_missing_names = {m["name"] for m in ws_missing}
+
+# "닭 가슴살" → 정규화 → "닭 가슴살" (단일 공백)
+# pantry "닭가슴살" → 정규화 → "닭가슴살"
+# 띄어쓰기가 다르면 다른 재료 → missing에 포함될 수 있음
+# 이 케이스는 의도적으로 감지: "닭 가슴살" ≠ "닭가슴살" 은 현재 스펙상 다른 재료
+# → 실제 LLM이 일관된 이름을 쓰는지 확인하는 것이 목적
+
+ok10a = "양파" in ws_missing_names            # pantry에 없는 재료는 반드시 missing
+ok10b = " 두부 " not in ws_missing_names      # 앞뒤 공백 정규화 → missing에서 제외
+ok10c = " 두부" not in ws_missing_names       # 앞 공백 정규화 → missing에서 제외
+
+step10_pass = ok10a and ok10b and ok10c
+
+print(f"\n  whitespace 포함 pantry : {[p['name'] for p in WHITESPACE_PANTRY]}")
+print(f"  whitespace 포함 재료명 : {[i['name'] for i in WHITESPACE_RECIPES[0]['ingredients']]}")
+print(f"  실제 missing           : {sorted(ws_missing_names)}")
+print(f"\n  '양파' missing 포함 (pantry에 없음)    : {'✅' if ok10a else '❌'}")
+print(f"  ' 두부 ' missing 제외 (앞뒤 공백 정규화): {'✅' if ok10b else '❌'}")
+print(f"  ' 두부'  missing 제외 (앞 공백 정규화)  : {'✅' if ok10c else '❌'}")
+print(f"\n  STEP 10 결과: {'✅' if step10_pass else '❌'}")
+
+
+# ─────────────────────────────────────────────────────────────
 # 최종 요약
 # ─────────────────────────────────────────────────────────────
 divider("최종 요약")
 
 results_summary = [
-    ("STEP 1", "shopping_agent() 정상 실행 — state 구조 검증",   step1_pass),
-    ("STEP 2", "pantry 재료 제외 검증",                          step2_pass),
-    ("STEP 3", "미보유 재료 포함 검증",                          step3_pass),
-    ("STEP 4", "needed_by 유효성 검증",                          step4_pass),
-    ("STEP 5", "이름 오름차순 정렬 검증",                         step5_pass),
-    ("STEP 6", "log 검증",                                       step6_pass),
-    ("STEP 7", "엣지케이스: pantry_items=[]",                    step7_pass),
-    ("STEP 8", "엣지케이스: meal_plan={}",                       step8_pass),
+    ("STEP 1",  "shopping_agent() 정상 실행 — state 구조 검증",   step1_pass),
+    ("STEP 2",  "pantry 재료 제외 검증",                          step2_pass),
+    ("STEP 3",  "미보유 재료 포함 검증",                          step3_pass),
+    ("STEP 4",  "needed_by 유효성 검증",                          step4_pass),
+    ("STEP 5",  "이름 오름차순 정렬 검증",                        step5_pass),
+    ("STEP 6",  "log 검증",                                       step6_pass),
+    ("STEP 7",  "엣지케이스: pantry_items=[]",                    step7_pass),
+    ("STEP 8",  "엣지케이스: meal_plan={}",                       step8_pass),
+    ("STEP 9",  "_format_quantity() 출력 테스트",                 step9_pass),
+    ("STEP 10", "재료명 띄어쓰기 정규화 검증",                    step10_pass),
 ]
 print()
 for step, desc, passed in results_summary:

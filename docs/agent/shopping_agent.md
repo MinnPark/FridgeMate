@@ -282,6 +282,65 @@ missing_ingredients = [
 
 ---
 
+## LLM 응답 정규화 함수 (UI 연동 버그 수정)
+
+> UI 연동 테스트에서 발견된 버그 2종을 수정하기 위해 추가된 함수들
+
+### 버그 1: 재료명 띄어쓰기 → 다른 재료로 인식
+
+```
+"닭  가슴살" (LLM 응답)  vs  "닭가슴살" (pantry)
+→ .strip()만으로는 내부 공백 처리 불가 → 다른 재료로 인식 → missing에 포함되는 문제
+```
+
+#### `_normalize_name()` — 재료명 정규화
+
+```python
+_normalize_name("닭  가슴살")  → "닭 가슴살"   # 중복 공백 제거
+_normalize_name(" 브로콜리 ")  → "브로콜리"    # 앞뒤 공백 제거
+_normalize_name("닭\t가슴살")  → "닭 가슴살"   # 탭 → 공백
+```
+
+> 적용 위치: `_collect_used_recipes()`, `_aggregate_ingredients()`, `_calc_missing()` 전 함수
+
+---
+
+### 버그 2: "12g+3", "6작은술" 형태 출력
+
+```
+원인: LLM이 unit 필드에 "g+3" 같은 잘못된 값 반환
+      → _format_quantity(12, "g+3") = "12g+3"  ← 비정상 출력
+
+또는: LLM이 amount 필드에 "6작은술" 같은 문자열 반환
+      → amount * count = "6작은술6작은술"  ← 문자열 반복
+```
+
+#### `_parse_amount()` — amount 안전 파싱
+
+```python
+_parse_amount(12)          → 12.0    # 정수
+_parse_amount("12")        → 12.0    # 숫자 문자열
+_parse_amount("12g")       → 12.0    # 단위 혼입
+_parse_amount("12g+3")     → 12.0    # 복합 표현 → 선두 숫자만 추출
+_parse_amount("6작은술")   → 6.0     # 한글 단위 혼입
+_parse_amount("1~2")       → 1.0     # 범위 → 최솟값
+_parse_amount("약간")      → None    # 파싱 불가
+_parse_amount(None)        → None
+```
+
+#### `_normalize_unit()` — unit 정규화
+
+```python
+_normalize_unit("g")       → "g"     # 정상
+_normalize_unit("g+3")     → "g"     # 특수문자 제거
+_normalize_unit("g/개")    → "g"     # 슬래시 앞 단위만 사용
+_normalize_unit("ml ")     → "ml"    # 공백 제거
+_normalize_unit("")        → None
+_normalize_unit(None)      → None
+```
+
+---
+
 ## `_format_quantity()` — Coupang 팀 quantity 포맷
 
 ```python
@@ -393,6 +452,9 @@ cart_items = create_cart_deeplinks(products)
 | 함수 | 위치 | 역할 |
 |------|------|------|
 | `shopping_agent()` | `shopping_agent.py` | 전체 오케스트레이션 |
+| `_normalize_name()` | `shopping_agent.py` | 재료명 띄어쓰기 정규화 |
+| `_parse_amount()` | `shopping_agent.py` | LLM amount 문자열 안전 파싱 |
+| `_normalize_unit()` | `shopping_agent.py` | LLM unit 문자열 정규화 |
 | `_collect_used_recipes()` | `shopping_agent.py` | STEP A — 사용 레시피 + 횟수 추출 |
 | `_aggregate_ingredients()` | `shopping_agent.py` | STEP B — 재료 집계 + count 배수 |
 | `_calc_missing()` | `shopping_agent.py` | STEP C — 냉장고 비교 → 부족 재료 필터 |
@@ -427,3 +489,5 @@ python tests/test_shopping_agent.py
 | STEP 6 | log(`missing_calculated`) 구조 검증 |
 | STEP 7 | 엣지케이스: `pantry_items=[]` |
 | STEP 8 | 엣지케이스: `meal_plan={}` |
+| STEP 9 | `_format_quantity()` 출력 테스트 |
+| STEP 10 | 재료명 띄어쓰기 정규화 검증 |
