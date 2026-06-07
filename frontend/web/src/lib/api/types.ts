@@ -163,6 +163,7 @@ export interface ShoppingItem {
   score?: ScoreInfo; // 상품 점수 (mock/백엔드 제공)
   neededAmount?: number; // 필요 총량(neededUnit 기준). 검색 상품 용량과 비교해 담을 개수 산정용.
   neededUnit?: "g" | "ml" | "개"; // 단위 계열(무게 g / 부피 ml / 과일 개).
+  recipeContexts?: string[]; // 이 재료를 사용하는 레시피명. 상품 의미 판정에 사용.
 }
 
 export interface ShoppingList {
@@ -268,4 +269,18 @@ export interface CoupangProductSearchResult {
   // 선택 상품 용량 vs 필요량으로 산정한 담기 방식/개수.
   addMode?: "direct" | "adjust";
   quantity?: number;
+  rankConfidence?: number;
+  rankReason?: string;
+  rankProvider?: string;
+  usedLlm?: boolean;
+  requiresReview?: boolean;
+}
+
+export interface ProductRankResponse {
+  selected_id: number | null;
+  confidence: number;
+  reason: string;
+  auto_select: boolean;
+  provider: string;
+  used_llm: boolean;
 }
