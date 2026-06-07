@@ -92,7 +92,7 @@ export function searchProductsViaExtension(
     ingredient: string;
     quantityText?: string;
     neededG?: number; // 필요 총량(그램 가정)
-    preference?: "speed" | "freshness" | "price" | "nutrition"; // 정렬 최우선 기준
+    preference?: "speed" | "price"; // 정렬 최우선 기준
   }>,
   onProgress?: (p: SearchProgress) => void,
 ): Promise<CoupangProductSearchResult[]> {

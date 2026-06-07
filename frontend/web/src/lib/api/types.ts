@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 export type FridgeMateMode = "today" | "weekend" | "meal_prep" | "goal";
 
-export type DeliveryPreference = "speed" | "freshness" | "price" | "nutrition";
+export type DeliveryPreference = "speed" | "price";
 
 export interface FridgeMateRequest {
   ingredients: string; // 쉼표 구분 텍스트 (예: "닭가슴살, 계란, 브로콜리, 두부")
@@ -252,7 +252,6 @@ export interface CoupangSearchCandidate {
   url: string;
   isAd: boolean;
   isRocket: boolean;
-  isRocketFresh?: boolean; // 로켓프레시(신선도 프록시)
   delivery?: string;
   amountG?: number | null; // 상품명에서 파싱한 용량(그램 가정). 못 구하면 null.
   score: number;

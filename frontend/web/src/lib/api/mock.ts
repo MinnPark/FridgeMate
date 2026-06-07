@@ -34,7 +34,7 @@ export const DEMO_REQUEST: FridgeMateRequest = {
   peopleCount: 2,
   excludedIngredients: "해산물",
   maxCookingMinutes: 20,
-  deliveryPreference: "freshness",
+  deliveryPreference: "speed",
 };
 
 const COUPANG_SEARCH = (names: string[]) =>

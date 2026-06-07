@@ -488,11 +488,7 @@ function extractSearchCandidatesInPage(limit) {
     const rocketEl = root.querySelector(
       "img[alt*='로켓'], img[src*='rocket' i], [class*='rocket' i]",
     );
-    const freshEl = root.querySelector(
-      "img[alt*='프레시'], img[src*='fresh' i], [class*='fresh' i]",
-    );
     const isRocket = /로켓/.test(allText) || !!rocketEl;
-    const isRocketFresh = /로켓\s*프레시/.test(allText) || !!freshEl;
     const delivery = firstText(root, [
       ".arrival-info",
       ".delivery",
@@ -508,7 +504,6 @@ function extractSearchCandidatesInPage(limit) {
       url, // 상품 경로와 itemId/vendorItemId만 유지해 선택 옵션으로 바로 이동.
       isAd,
       isRocket,
-      isRocketFresh,
       // 용량은 카드 전체 텍스트에서 파싱(상품명 앵커가 제목만일 때도 "150g, 1개" 등 확보).
       amountG: parseAmountG(allText) ?? parseAmountG(name),
       delivery,
@@ -530,9 +525,8 @@ function normalizeSearchText(value) {
 }
 
 // 선호(preference)에 따른 단일 최우선 정렬(가중치 혼합 아님).
-//  - price/nutrition/기본 → 최저가
+//  - price/기본 → 최저가
 //  - speed → 로켓 상품 먼저, 그 안에서 최저가
-//  - freshness → 로켓프레시 먼저, 그다음 로켓, 그 안에서 최저가
 // 단, 항상 (1) 재료명 관련성, (2) 광고 여부를 앞 기준으로 둔다(엉뚱/광고 상품 방지).
 function rankSearchCandidates(ingredient, candidates, preference) {
   const needle = normalizeSearchText(ingredient);
@@ -614,9 +608,6 @@ function rankSearchCandidates(ingredient, candidates, preference) {
   if (preference === "speed") {
     const rocket = list.filter((c) => c.isRocket);
     if (rocket.length) list = rocket; // 로켓 없으면 폴백
-  } else if (preference === "freshness") {
-    const fresh = list.filter((c) => c.isRocketFresh);
-    if (fresh.length) list = fresh;
   }
   // 관련성 높은 순 → 쿠팡 원래 순서(낮은 가격순) 유지(stable sort).
   return list.sort((a, b) => b.score - a.score || a._i - b._i);
@@ -677,14 +668,14 @@ async function searchOneIngredient(item, reusableTabId) {
   const neededG = Number(item.neededG) || null;
   // 필요 g 가 있으면 검색어에 용량을 붙여, 쿠팡이 비슷한 용량 상품을 우선 노출하게 한다.
   const query = neededG ? `${ingredient} ${neededG}g` : ingredient;
-  // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송/신선도면) 로켓 필터.
+  // 쿠팡 정렬/필터를 그대로 사용: 낮은 가격순(salePriceAsc) + (빠른배송면) 로켓 필터.
   const params = new URLSearchParams({
     q: query,
     channel: "user",
     listSize: "36",
     sorter: "salePriceAsc",
   });
-  if (item.preference === "speed" || item.preference === "freshness") {
+  if (item.preference === "speed") {
     params.set("filterType", "rocket_luxury,rocket_wow,coupang_global");
     params.set("rocketAll", "true");
   }
