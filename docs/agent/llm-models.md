@@ -21,6 +21,22 @@
 - **RAG_LLM_PROVIDER**: 서브쿼리 전용(기본 `local`). 오케와 분리 — 작은 쿼리에 큰 모델 비용 안 쓰려고.
 - **FRIDGEMATE_USE_LLM**: `true` 여야 실제 LLM 호출. 아니면 모든 노드가 휴리스틱/fallback(offline 동작).
 
+## 1.5 로컬 모델 — LM Studio 에 여러 개, 골라 쓸 수 있음
+
+로컬(LM Studio, 58 서버 `:1234`)엔 임베딩/챗 모델이 여러 개 올라가 있고 **그중 골라 쓴다**.
+- **조회**: `GET {LMSTUDIO_BASE_URL}/models` (헤더 `Authorization: Bearer {LMSTUDIO_API_KEY}`)
+- **전환**: 임베딩 -> `.env` 의 `EMBED_MODEL_LOCAL` / 챗 서브쿼리 -> `LOCAL_MODEL_DEFAULT` 에 모델 ID 기입
+
+2026-06-08 기준 17개(바뀔 수 있음):
+- **임베딩**: `text-embedding-bge-m3`(현재) · `text-embedding-kure-v1` · `text-embedding-nomic-embed-text-v1.5`
+- **챗(작은->큰)**: `qwen2.5-0.5b-instruct` · `llama_3.2_1b...` · `google/gemma-4-e4b` · `qwen3-4b-toolcalling-codex` ·
+  `qwen/qwen3-4b-thinking-2507` · `qwen2.5-7b-instruct`(현재 서브쿼리) · `deepseek/deepseek-r1-0528-qwen3-8b` ·
+  `granite-3.0-8b-instruct` · `microsoft/phi-4` · `qwen/qwen3-14b` · `openai/gpt-oss-20b` ·
+  `qwen/qwen3-coder-30b` · `google/gemma-4-31b` · `granite-docling-258m`
+
+> 주의: 로컬 모델 ID 가 코드 기본값(`_llm.py` PROVIDER_DEFAULT_MODELS)에 하드코딩돼 있다.
+> 모델을 바꾸려면 코드 수정 말고 `.env` 의 `LOCAL_MODEL_DEFAULT` 로 오버라이드 권장(CLAUDE.md "모델 ID 하드코딩 금지").
+
 ## 2. 자연어 -> constraints/선호도 파싱 (집중)
 
 위치: `v3/nodes/intake.py` (진입 pantry 다음 두 번째 노드). **2단계**:
