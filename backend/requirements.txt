@@ -8,8 +8,10 @@ uvicorn[standard]==0.34.0   # ASGI 서버 (백엔드 8742 기동)
 pydantic==2.10.4            # 요청/그래프 상태 스키마
 
 # --- 오케스트레이션 (LangGraph) ---
-langgraph==1.0.10           # 그래프: pantry -> meal/recipe -> shopping
+langgraph==1.2.4            # ← 1.0.10 → 1.2.4 수정
 langchain-core==1.4.1       # langgraph 코어 의존
+langchain-openai>=0.1.0
+langchain-anthropic>=0.1.0
 
 # --- RAG 엔진 (bge-m3 임베딩 + ChromaDB + HyDE/RAG-Fusion/RRF) ---
 chromadb==1.5.9             # 로컬 벡터DB (recipe_db 1,693건, backend/data/chroma 동봉)
