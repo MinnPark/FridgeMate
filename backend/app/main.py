@@ -91,6 +91,66 @@ def _build_invoke_input(req: ChatRequest) -> dict:
     }
 
 
+def _run_tool_by_name(
+    name: str,
+    *,
+    selected_recipes: list,
+    nutrition_goal: dict,
+    missing_ingredients: list,
+):
+    if name == "verify_nutrition_goal_tool":
+        return verify_nutrition_goal_tool.invoke(
+            {
+                "recipes": selected_recipes,
+                "goal": nutrition_goal,
+                "num_days": 3,
+            }
+        )
+    if name == "search_coupang_products_tool":
+        return search_coupang_products_tool.invoke(
+            {"missing_ingredients": missing_ingredients}
+        )
+    raise ValueError(f"Unknown tool: {name}")
+
+
+def _required_tool_names(
+    *,
+    mode: str,
+    nutrition_goal: dict,
+    missing_ingredients: list,
+) -> list[str]:
+    tool_names: list[str] = []
+    if nutrition_goal:
+        tool_names.append("verify_nutrition_goal_tool")
+    if mode != "today" and missing_ingredients:
+        tool_names.append("search_coupang_products_tool")
+    return tool_names
+
+
+def _run_required_tools(
+    *,
+    mode: str,
+    selected_recipes: list,
+    nutrition_goal: dict,
+    missing_ingredients: list,
+) -> tuple[list[str], dict]:
+    calls: list[str] = []
+    results: dict = {}
+    for name in _required_tool_names(
+        mode=mode,
+        nutrition_goal=nutrition_goal,
+        missing_ingredients=missing_ingredients,
+    ):
+        results[name] = _run_tool_by_name(
+            name,
+            selected_recipes=selected_recipes,
+            nutrition_goal=nutrition_goal,
+            missing_ingredients=missing_ingredients,
+        )
+        calls.append(name)
+    return calls, results
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -170,11 +230,20 @@ def chat_with_tools(req: ChatRequest):
         ])
 
     except Exception as e:
-        # Fallback: 로컬 LLM tool_calls 미지원 시
+        # Fallback: 로컬 LLM tool_calls 미지원 시에도 mode 정책대로 도구 실행
+        tool_calls_made, tool_results = _run_required_tools(
+            mode=mode,
+            selected_recipes=selected_recipes,
+            nutrition_goal=nutrition_goal,
+            missing_ingredients=missing_ingredients,
+        )
+        if mode == "today":
+            pipeline_result.pop("missing_ingredients", None)
+            pipeline_result.pop("cart_items", None)
         return {
             **pipeline_result,
-            "tool_calls_made": [],
-            "tool_results":    {},
+            "tool_calls_made": tool_calls_made,
+            "tool_results":    tool_results,
             "mode":            mode,
             "fallback":        True,
             "fallback_reason": str(e),
@@ -194,22 +263,30 @@ def chat_with_tools(req: ChatRequest):
             if name not in tools_map:   # ← 바인딩 안 된 tool 차단
                 continue
 
-            if name == "verify_nutrition_goal_tool":
-                args = {
-                    "recipes":  selected_recipes,
-                    "goal":     nutrition_goal,
-                    "num_days": 3,
-                }
-            elif name == "search_coupang_products_tool":
-                args = {
-                    "missing_ingredients": missing_ingredients,
-                }
-            else:
-                args = tc.get("args", {})
-
-            tool_result = tools_map[name].invoke(args)   # ← tools_map 사용
+            tool_result = _run_tool_by_name(
+                name,
+                selected_recipes=selected_recipes,
+                nutrition_goal=nutrition_goal,
+                missing_ingredients=missing_ingredients,
+            )
             tool_calls_made.append(name)
             tool_results[name] = tool_result
+
+    # LLM이 도구를 호출하지 않았더라도 UI 입력 정책상 필요한 도구는 실행한다.
+    for required_name in _required_tool_names(
+        mode=mode,
+        nutrition_goal=nutrition_goal,
+        missing_ingredients=missing_ingredients,
+    ):
+        if required_name in tool_results:
+            continue
+        tool_results[required_name] = _run_tool_by_name(
+            required_name,
+            selected_recipes=selected_recipes,
+            nutrition_goal=nutrition_goal,
+            missing_ingredients=missing_ingredients,
+        )
+        tool_calls_made.append(required_name)
 
     # today 모드 → 장보기 결과 제거 ← 추가
     if mode == "today":
