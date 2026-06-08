@@ -2,6 +2,7 @@ from typing import Any, Literal, TypedDict
 
 
 Route = Literal["meal", "shopping", "recipe", "finish"]
+Mode = Literal["today", "weekend", "mealprep", "goal"]   # ← 추가
 
 
 class FridgeMateState(TypedDict, total=False):
@@ -9,6 +10,7 @@ class FridgeMateState(TypedDict, total=False):
     user_input: str
     ingredient_entries: list[dict[str, Any]]   # 프론트 구조화 입력
     excluded_ingredients: str                  # ← 추가 ("닭가슴살,돼지고기" 형식)
+    mode: Mode                                             # ← 추가
 
     # Pantry
     pantry_items: list[dict[str, Any]]

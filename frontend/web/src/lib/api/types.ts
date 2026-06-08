@@ -7,17 +7,19 @@
 // ---------------------------------------------------------------------------
 // 요청(Request)
 // ---------------------------------------------------------------------------
-export type FridgeMateMode = "today" | "weekend" | "meal_prep" | "goal";
+export type FridgeMateMode = "today" | "weekend" | "mealprep" | "goal"; // ← meal_prep → mealprep
 
 export type DeliveryPreference = "speed" | "price";
 
 export interface FridgeMateRequest {
-  ingredients: string; // 쉼표 구분 텍스트 (예: "닭가슴살, 계란, 브로콜리, 두부")
-  ingredientEntries?: IngredientEntry[]; // 재료 세부정보(용량/유통기한/보관) — 백엔드 Pantry 분석용
+  ingredients: string;
+  ingredientEntries?: IngredientEntry[];
   mode: FridgeMateMode;
   goal?: string;
   proteinTargetGram?: number;
   calorieTargetKcal?: number;
+  carbsTargetGram?: number;   // ← 추가
+  fatTargetGram?: number;     // ← 추가
   budgetKrw?: number;
   peopleCount?: number;
   excludedIngredients?: string;
@@ -47,9 +49,15 @@ export interface ScoreInfo {
 // ---------------------------------------------------------------------------
 // Agent Pipeline
 // ---------------------------------------------------------------------------
-export type AgentStatus = "completed" | "running" | "pending" | "failed";
+export type AgentStatus = "completed" | "running" | "pending" | "failed" | "error"; // ← error 추가
 
-export type AgentId = "pantry" | "recipe" | "meal" | "shopping" | "executor";
+export type AgentId =
+  | "pantry"
+  | "recipe"
+  | "meal"
+  | "shopping"
+  | "executor"
+  | "tools";    // ← 추가
 
 export interface AgentPipelineItem {
   id: AgentId;
