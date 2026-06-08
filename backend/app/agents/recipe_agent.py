@@ -54,10 +54,10 @@ def _build_query(state: FridgeMateState) -> str:
 
     우선순위:
       1. excluded_ingredients 를 pantry_items 에서 먼저 제거
-      2. expiry_priority == "high" 재료를 앞에 배치
-      3. priority 재료가 없으면 전체 재료 이름 사용
-      4. user_input 을 뒤에 결합
-      5. 둘 다 없으면 빈 문자열 반환
+      2. expiry_priority == "high" 재료를 앞에 배치하되, 나머지 재료도 모두 포함
+         (임박재료만으로 쿼리가 쏠려 나머지 재료가 묻히는 것 방지)
+      3. user_input 을 뒤에 결합
+      4. 둘 다 없으면 빈 문자열 반환
     """
     pantry_items = state.get("pantry_items") or []
     user_input   = (state.get("user_input") or "").strip()
@@ -76,18 +76,16 @@ def _build_query(state: FridgeMateState) -> str:
         if item.get("name", "").strip() not in excluded_names
     ]
 
-    priority_names = [
-        item["name"]
-        for item in filtered_pantry
-        if item.get("expiry_priority") == "high"
-    ]
-
-    if not priority_names:
-        priority_names = [item["name"] for item in filtered_pantry]
+    # 임박재료(high)를 앞에 두되, 나머지 재료도 모두 포함한다.
+    # (이전엔 high 가 하나라도 있으면 그것만 쓰고 나머지를 버려서, 재료를 여러 개
+    #  넣어도 임박재료 하나로만 검색됐다 — 다양한 재료가 다양한 레시피로 안 이어짐.)
+    high = [i["name"] for i in filtered_pantry if i.get("expiry_priority") == "high"]
+    rest = [i["name"] for i in filtered_pantry if i.get("expiry_priority") != "high"]
+    ordered_names = high + rest
 
     parts: list[str] = []
-    if priority_names:
-        parts.append(" ".join(priority_names))
+    if ordered_names:
+        parts.append(" ".join(ordered_names))
     if user_input:
         parts.append(user_input)
 
