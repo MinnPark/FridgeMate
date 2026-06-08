@@ -144,6 +144,25 @@ def _ensure_unique_recipes(plan: dict, recipe_titles: list[str]) -> dict:
     return plan
 
 
+def _constrain_recipe_titles(plan: dict, recipe_titles: list[str]) -> dict:
+    """Backward-compatible helper for older contract tests.
+
+    The production path now uses _ensure_unique_recipes() to also remove
+    duplicates, but older tests only assert that out-of-list titles are replaced
+    with an allowed recipe title.
+    """
+    if not recipe_titles:
+        return plan
+
+    allowed = set(recipe_titles)
+    fallback_title = recipe_titles[0]
+    for day in plan.get("days", []):
+        for entry in day.get("entries", []):
+            if entry.get("recipeTitle") not in allowed:
+                entry["recipeTitle"] = fallback_title
+    return plan
+
+
 # ─────────────────────────────────────────────────────────────
 # STEP 4: create_weekly_plan() 수정
 # ─────────────────────────────────────────────────────────────

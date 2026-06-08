@@ -1,5 +1,4 @@
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode                              # ← 추가
 
 from app.agents.meal_agent import meal_agent
 from app.agents.pantry_agent import pantry_agent
@@ -123,7 +122,6 @@ def build_tool_graph():
     graph.add_node("recipe",   recipe_agent)
     graph.add_node("meal",     meal_agent)
     graph.add_node("shopping", shopping_agent)
-    graph.add_node("tools",    ToolNode(FRIDGEMATE_TOOLS))  # ← Tool 노드 등록
 
     graph.set_entry_point("pantry")
 
@@ -131,6 +129,6 @@ def build_tool_graph():
     graph.add_edge("pantry",   "recipe")
     graph.add_edge("recipe",   "meal")
     graph.add_edge("meal",     "shopping")
-    graph.add_edge("shopping", END)               # tools 노드는 main.py에서 직접 호출
+    graph.add_edge("shopping", END)
 
     return graph.compile()

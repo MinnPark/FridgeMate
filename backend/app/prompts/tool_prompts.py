@@ -13,16 +13,16 @@ TOOL_SYSTEM_PROMPT = """
                 "영양 검증", "목표 달성 확인" 표현이 있을 때
    - 호출 금지: 영양 목표 언급이 전혀 없을 때
 
-2. compute_missing_tool
+2. search_coupang_products_tool
    - 호출 조건: 사용자가 "장보기 목록", "사야 할 재료" 를 요청하거나
                 주말/밀프렙처럼 미리 준비하는 상황일 때
    - 호출 금지: "오늘 당장", "지금 바로", "냉장고 재료만으로" 표현일 때
 
 MODE별 도구 호출 기준:
   today    → 도구 호출 없음
-  weekend  → compute_missing_tool 만 호출
-  mealprep → compute_missing_tool 만 호출
-  goal     → verify_nutrition_goal_tool + compute_missing_tool 둘 다 호출
+  weekend  → search_coupang_products_tool 만 호출
+  mealprep → search_coupang_products_tool 만 호출
+  goal     → verify_nutrition_goal_tool + search_coupang_products_tool 둘 다 호출
 
 도구 없이 답할 수 있는 것은 도구를 호출하지 마세요.
 """

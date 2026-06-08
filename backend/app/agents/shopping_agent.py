@@ -271,7 +271,7 @@ def shopping_agent(state: FridgeMateState) -> FridgeMateState:
       state["logs"]
     """
     # today 모드 → 장보기 스킵 ← 추가
-    mode = state.get("mode", "today")
+    mode = state.get("mode")
     if mode == "today":
         return {
             **state,

@@ -202,24 +202,27 @@ def get_llm():
     if provider == "openrouter":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            model       = model or os.getenv("OPENROUTER_MODEL_DEFAULT", "anthropic/claude-sonnet-4-6"),
-            openai_api_key  = os.getenv("OPENROUTER_API_KEY"),
-            openai_api_base = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            temperature = 0.2,
+            model=model or os.getenv("OPENROUTER_MODEL_DEFAULT", "anthropic/claude-sonnet-4-6"),
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            temperature=0.2,
         )
 
     if provider == "openai" and os.getenv("OPENAI_API_KEY"):
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            model       = model or "gpt-4o-mini",
-            temperature = 0.2,
+            model=model or "gpt-4o-mini",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("FRIDGEMATE_LLM_BASE_URL") or None,
+            temperature=0.2,
         )
 
     if provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
         from langchain_anthropic import ChatAnthropic
         return ChatAnthropic(
-            model       = model or "claude-3-5-sonnet-latest",
-            temperature = 0.2,
+            model=model or "claude-3-5-sonnet-latest",
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            temperature=0.2,
         )
 
     raise ValueError(
