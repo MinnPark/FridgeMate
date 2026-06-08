@@ -93,12 +93,19 @@ query
       {"name": "양상추",   "amount": 30,  "unit": "g"}
     ],
     "nutrition": {"calories": 210, "protein": 23.7, "carbs": 8.0, "fat": 5.0},  // carb -> carbs
+    "nutrition_available": true,                // P/C/F 미수집(농정원 226 등)이면 false = '미상'(0 아님)
     "score": 0.87,                              // 0..1 정규화 유사도
     "citation_url": "https://www.foodsafetykorea.go.kr",  // 기관 도메인 (레시피별 deep-link 아님)
     "final_score": 0.87
   }
   // ...
 ]
+```
+
+**영양 미수집 식별** (`nutrition_available`): P/C/F 가 전부 0 이면 `false` = "데이터 없음/미상"(진짜 0 아님). 농정원 226 셋이 해당. 실데이터 두 경우:
+```jsonc
+// 영양 있음(식약처):    "nutrition": {"calories":49, "protein":4.8,"carbs":3.5,"fat":2.8}, "nutrition_available": true
+// 영양 없음(농정원 226): "nutrition": {"calories":120,"protein":0,  "carbs":0,  "fat":0},   "nutrition_available": false
 ```
 
 부수효과: `state["recipe_search_trace"] = {strategy, original_query, n_results, via, top, embedder}`.
@@ -165,7 +172,7 @@ where: cuisine_type="한식" AND time_min<=30 AND protein>=20 AND calories<=600 
 
 1. **영양/시간/장르 = ChromaDB `where` 직접 가능** (숫자/문자 메타). 데이터는 식약처 1,146건 완비.
 2. **재료 포함/제외 = `where`로 직접 안 됨** — `ingredients`가 JSON 문자열로 저장돼 ChromaDB가 내부를 못 본다. **검색 후 파이썬 후처리**로 거른다. (필터로 n이 줄 수 있으니 검색 k를 넉넉히 뽑고 후처리)
-3. **농정원 537건은 영양 0** — `protein_min` 필터에 자동 탈락. "거짓 통과"는 안 생기나 **"데이터 없음"과 "진짜 0"을 구분 못 해 농정원이 영양 필터에선 통째로 빠진다.** 의도된 동작인지 합의 필요(안전 측면에선 빠지는 게 맞음).
+3. **농정원 537건은 영양(P/C/F) 0** — `protein_min` 필터에 자동 탈락. **응답은 `nutrition_available=false` 로 "데이터 없음 vs 진짜 0"을 구분한다(2026-06-08 해결).** 영양 필터에선 빠지는 게 맞음(안전). 참고: 농정원 영양결합 API(688)를 채움용으로 검토했으나 식약처 cookrcp 와 중복이라 미채택 — 537건은 채울 소스 없음.
 
 ---
 
@@ -185,5 +192,5 @@ where: cuisine_type="한식" AND time_min<=30 AND protein>=20 AND calories<=600 
 ## 6. 합의 필요 (팀)
 
 - `FridgeMateState`에 `constraints` 필드 추가 (또는 기존 필드 재사용) — 에이전트->RAG 전달 통로.
-- 영양 필터에서 농정원(영양 0)을 빼는 게 맞는지 (데이터 없음 vs 진짜 0).
+- ~~영양 필터에서 농정원(영양 0)을 빼는 게 맞는지 (데이터 없음 vs 진짜 0).~~ → **해결**: 응답에 `nutrition_available` 추가(false=미수집). 영양 필터에선 빠짐(안전).
 - 관련 문서: [rag-support-plan.md](rag-support-plan.md)(보강 작업 전반), [rag-INDEX.md](rag-INDEX.md)(문서 인덱스).
