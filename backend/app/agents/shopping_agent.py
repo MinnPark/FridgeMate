@@ -264,19 +264,27 @@ def shopping_agent(state: FridgeMateState) -> FridgeMateState:
       state["meal_plan"]          (meal_agent 생성)
       state["selected_recipes"]   (recipe_agent 생성, meal_agent에서 오염 없이 유지)
       state["pantry_items"]       (pantry_agent 생성)
+      state["mode"]               (today 모드이면 스킵)
 
     출력:
       state["missing_ingredients"]  → Coupang 팀이 cart_items로 변환
       state["logs"]
-
-    missing_ingredients 구조 (chatAdapter.ts ChatState 계약):
-      [{
-        "name":      str,           # 재료명
-        "amount":    float | None,  # 필요 총량 (식단 사용 횟수 × 1회 분량)
-        "unit":      str | None,    # 단위 (g, 개, ml, ...)
-        "needed_by": [str],         # 이 재료가 필요한 레시피 목록
-      }]
     """
+    # today 모드 → 장보기 스킵 ← 추가
+    mode = state.get("mode", "today")
+    if mode == "today":
+        return {
+            **state,
+            "missing_ingredients": [],
+            "cart_items":          [],
+            "logs": append_log(
+                state.get("logs"),
+                node="shopping",
+                event="skipped",
+                result={"reason": "today 모드 — 장보기 계산 불필요"},
+            ),
+        }
+
     meal_plan        = state.get("meal_plan") or {}
     selected_recipes = state.get("selected_recipes") or []
     pantry_items     = state.get("pantry_items") or []

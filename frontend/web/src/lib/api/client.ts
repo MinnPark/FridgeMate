@@ -12,6 +12,7 @@
 //   NEXT_PUBLIC_API_FALLBACK_TO_MOCK = "true" | "false"  (real 실패 시 mock, 기본 true)
 
 import {
+  getApiEndpoint,                // ← 추가
   mapChatToRunResponse,
   mapRequestToChat,
   type ChatState,
@@ -86,7 +87,7 @@ function friendlyError(prefix: string): string {
   return `${prefix} 백엔드에 연결하지 못했어요. 서버 실행 상태를 확인해 주세요.`;
 }
 
-/** 냉장고 재료 입력 → End-to-End 결과. real 모드는 팀 백엔드 `/chat` 호출 후 변환. */
+/** 냉장고 재료 입력 → End-to-End 결과. real 모드는 팀 백엔드 `/chat/tool` 호출 후 변환. */
 export async function runPipeline(
   req: FridgeMateRequest,
 ): Promise<ApiResult<RunResponse>> {
@@ -95,15 +96,19 @@ export async function runPipeline(
     return { data: buildRunResponse(req), source: "mock" };
   }
   try {
-    // 구조화 입력 → message/budget_limit 로 변환해 /chat 호출
-    const state = await postJson<ChatState>("/chat", mapRequestToChat(req));
-    // snake_case state → camelCase RunResponse 로 변환
+    const endpoint = getApiEndpoint(req.mode);              // ← 수정: "/chat/tool"
+    const chatReq  = mapRequestToChat(req);
+
+    const state = await postJson<ChatState>(endpoint, chatReq);
     return { data: mapChatToRunResponse(state, req), source: "real" };
   } catch (err) {
     if (fallbackToMockEnabled()) {
       const data = buildRunResponse(req);
       return {
-        data: { ...data, notice: "백엔드(/chat) 연결 실패로 mock 결과를 표시 중이에요." },
+        data: {
+          ...data,
+          notice: "백엔드(/chat/tool) 연결 실패로 mock 결과를 표시 중이에요.",
+        },
         source: "fallback-mock",
         notice: "실제 API 연결 실패 → mock fallback",
       };

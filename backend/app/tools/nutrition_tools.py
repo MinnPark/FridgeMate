@@ -1,4 +1,5 @@
 from typing import Any
+from langchain_core.tools import tool          # ← 추가
 
 
 def _build_warnings(totals: dict, targets: dict) -> list[str]:
@@ -129,3 +130,36 @@ def verify_nutrition_goal(
         "message":  message,
         "warnings": warnings,
     }
+
+
+# ── /chat/tool 전용 Tool Calling wrapper ───────────────────────────────────
+@tool
+def verify_nutrition_goal_tool(
+    recipes: list,
+    goal: dict,
+    num_days: int = 3,
+) -> dict:
+    """
+    레시피 목록의 영양소 하루 평균을 계산하고
+    단백질/칼로리 목표 달성 여부를 검증합니다.
+
+    goal 모드이거나 사용자가 단백질/칼로리 등
+    영양 목표를 언급했을 때 반드시 호출하세요.
+    영양 목표 언급이 없을 때는 호출하지 마세요.
+
+    Args:
+        recipes:  selected_recipes 목록 (nutrition 필드 포함)
+        goal:     하루 기준 영양 목표
+                  {"protein_target": 120, "calorie_target": 1700}
+        num_days: 식단 일수 (기본 3일)
+
+    Returns:
+        {
+            "protein":  {"current": 115, "target": 120,  "unit": "g"},
+            "calories": {"current": 1650,"target": 1700, "unit": "kcal"},
+            "passed":   True,
+            "message":  "...",
+            "warnings": [...],
+        }
+    """
+    return verify_nutrition_goal(recipes, goal, num_days)  # 기존 함수 그대로 호출
