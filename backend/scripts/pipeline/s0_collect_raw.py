@@ -6,11 +6,13 @@ raw 를 보존하므로 파싱을 고쳐도 API 재호출 없이 s1 부터 재�
 
 실행(backend 에서):
   .venv\\Scripts\\python.exe scripts\\pipeline\\s0_collect_raw.py
+
+API 연결 설정(엔드포인트 + 서비스 ID)은 코드 상수다 - env 로 관리하지 않는다.
+env 는 자격증명(API 키)과 수집량 한도만 담당한다.
 주의:
-  - cookrcp(식약처): FOOD_SAFETY_API_KEY(또는 sample 5건) - 어디서나 호출 가능.
-  - mafra(농정원): MAFRA_API_KEY - 호출 IP 제한(58.148.250.103) 서버에서만 성공.
-  - mafra 영양: MAFRA_NUTRITION_SERVICE 환경변수에 Grid_ID 설정 시 수집(미설정 시 보류).
-환경변수: COOKRCP_LIMIT(기본 1200), MAFRA_LIMIT(기본 1000).
+  - cookrcp(식약처): FOOD_SAFETY_API_KEY(또는 sample 5건).
+  - mafra(농정원): MAFRA_API_KEY 필요. 이 PC 에서 직접 호출됨(이전 IP 제한 가정은 사실 아님).
+자격증명/한도 env: MAFRA_API_KEY, FOOD_SAFETY_API_KEY, COOKRCP_LIMIT(기본 1200), MAFRA_LIMIT(기본 1000).
 """
 from __future__ import annotations
 
@@ -29,12 +31,11 @@ RAW = ROOT / "data" / "pipeline" / "00_raw"
 
 COOKRCP_BASE = "https://openapi.foodsafetykorea.go.kr/api"
 MAFRA_BASE = "http://211.237.50.150:7080/openapi"
-MAFRA_SVCS = {                                        # 채널 추가는 여기에 (서비스 ID)
-    "basic": "Grid_20150827000000000226_1",
-    "ingredient": "Grid_20150827000000000227_1",
-    "process": "Grid_20150827000000000228_1",
+MAFRA_SVCS = {                                        # 농정원 서비스 ID (연결 설정 = 코드 상수, env 아님)
+    "basic": "Grid_20150827000000000226_1",       # 레시피 기본정보
+    "ingredient": "Grid_20150827000000000227_1",  # 레시피 재료정보
+    "process": "Grid_20150827000000000228_1",      # 레시피 과정정보
 }
-NUTRITION_SVC = os.getenv("MAFRA_NUTRITION_SERVICE")  # 영양 결합 서비스 ID 확정 시 .env 에 설정
 
 
 async def _get(client: httpx.AsyncClient, url: str) -> dict:
@@ -65,17 +66,14 @@ async def collect_cookrcp(limit: int) -> tuple[list[dict], str]:
 
 
 async def collect_mafra(limit: int) -> tuple[dict[str, list[dict]], str]:
-    """농정원 서비스별(기본/재료/과정[/영양]) raw row 수집. 키 없으면 보류."""
+    """농정원 서비스별(기본/재료/과정) raw row 수집. 키 없으면 보류."""
     key = os.getenv("MAFRA_API_KEY")
     if not key:
         return {}, "missing"
-    svcs = dict(MAFRA_SVCS)
-    if NUTRITION_SVC:
-        svcs["nutrition"] = NUTRITION_SVC
     out: dict[str, list[dict]] = {}
     async with httpx.AsyncClient(timeout=30.0) as c:
-        for name, svc in svcs.items():
-            cap = limit if name == "basic" else 100000
+        for name, svc in MAFRA_SVCS.items():
+            cap = limit if name == "basic" else 100000  # 재료/과정은 레시피당 다행 -> 큰 상한
             rows: list[dict] = []
             start = 1
             while start <= cap:
@@ -83,7 +81,7 @@ async def collect_mafra(limit: int) -> tuple[dict[str, list[dict]], str]:
                 try:
                     j = await _get(c, f"{MAFRA_BASE}/{key}/json/{svc}/{start}/{end}")
                 except Exception as e:
-                    print(f"  [mafra/{name}] 실패: {type(e).__name__} (IP 제한 가능)")
+                    print(f"  [mafra/{name}] 실패: {type(e).__name__}")
                     break
                 r = (j.get(svc) or {}).get("row") or []
                 if not r:
@@ -121,16 +119,13 @@ async def main() -> None:
     # 채널: 농정원 (서비스별)
     msvc, st = await collect_mafra(int(os.getenv("MAFRA_LIMIT", "1000")))
     if st == "missing":
-        print("  [mafra] MAFRA_API_KEY 미설정 -> 보류 (58 서버에서 수집)")
-        manifest["channels"]["mafra"] = {"status": "skipped(no key / IP restricted)"}
+        print("  [mafra] MAFRA_API_KEY 미설정 -> 보류")
+        manifest["channels"]["mafra"] = {"status": "skipped(no MAFRA_API_KEY)"}
     else:
         for name, mrows in msvc.items():
-            n = _save(RAW / f"mafra_{name}.json", "mafra", MAFRA_SVCS.get(name, NUTRITION_SVC or "?"), mrows)
-            manifest["channels"][f"mafra_{name}"] = {"count": n, "key": st}
+            n = _save(RAW / f"mafra_{name}.json", "mafra", MAFRA_SVCS[name], mrows)
+            manifest["channels"][f"mafra_{name}"] = {"service": MAFRA_SVCS[name], "count": n, "key": st}
             print(f"  [mafra/{name}] raw {n}행 저장")
-    if not NUTRITION_SVC:
-        print("  [mafra/nutrition] MAFRA_NUTRITION_SERVICE 미설정 -> 영양 raw 보류(서비스 ID 확정 필요)")
-        manifest["channels"]["mafra_nutrition"] = {"status": "pending(service id 미확정)"}
 
     (RAW / "_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

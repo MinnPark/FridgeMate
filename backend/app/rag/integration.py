@@ -37,7 +37,7 @@ from app.rag.rag_fusion import rag_fusion_search
 # ✅ 2026-06-06 clone 후 VERIFY 완료 — 실제 recipe_agent.py 기준.
 # 실제 mock 반환 계약 = 6키. citation_url/final_score 는 우리가 더 주는 보너스(그쪽 consumer 무시 OK).
 REQUIRED_CONTRACT_KEYS = ("id", "name", "text", "ingredients", "nutrition", "score")
-TEAMMATE_CONTRACT_KEYS = REQUIRED_CONTRACT_KEYS + ("citation_url", "final_score")
+TEAMMATE_CONTRACT_KEYS = REQUIRED_CONTRACT_KEYS + ("citation_url", "final_score", "nutrition_available")
 _INGREDIENT_KEYS = ("name", "amount", "unit")           # ✅ 실제 일치 (우리 qty→amount)
 _NUTRITION_KEYS = ("calories", "protein", "carbs", "fat")  # ✅ 실제 일치 (우리 carb→carbs)
 
@@ -88,17 +88,24 @@ def to_contract(d: dict) -> dict:
         for i in (d.get("ingredients") or [])
         if isinstance(i, dict)
     ]
+    # 영양 미수집(예: mafra 226 셋은 P/C/F 없음)을 응답에서 진짜 '0' 과 구분한다.
+    # 키/타입 계약은 유지(숫자) — consumer 호환. 식별은 nutrition_available 플래그로.
+    def _num(v: object) -> float:
+        return float(v) if isinstance(v, (int, float)) else 0.0
+    cal, prot, carb, fat = (_num(d.get(k)) for k in ("calories", "protein", "carb", "fat"))
+    macros_known = prot > 0 or carb > 0 or fat > 0   # P/C/F 전부 0 = '없음'이 아니라 '미상'
     item = {
         "id": str(d.get("id") or d.get("name") or ""),
         "name": d.get("name", ""),
         "text": " ".join(d.get("steps") or []) or d.get("name", ""),
         "ingredients": ingredients,
         "nutrition": {
-            "calories": d.get("calories", 0),
-            "protein": d.get("protein", 0),
-            "carbs": d.get("carb", 0),     # 우리는 'carb', 그쪽은 'carbs'
-            "fat": d.get("fat", 0),
+            "calories": cal,
+            "protein": prot,
+            "carbs": carb,                 # 우리는 'carb', 그쪽은 'carbs'
+            "fat": fat,
         },
+        "nutrition_available": macros_known,       # False => P/C/F 미수집(0 은 '모름'). 226 셋 식별·응답표기용
         "score": s,
         "citation_url": d.get("source_url", ""),  # 보고서 H6(citation 누락) 해소
         "final_score": s,                          # 제철/트렌드 부스팅 전까진 score 와 동일
