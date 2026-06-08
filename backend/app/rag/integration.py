@@ -88,12 +88,14 @@ def to_contract(d: dict) -> dict:
         for i in (d.get("ingredients") or [])
         if isinstance(i, dict)
     ]
-    # 영양 미수집(예: mafra 226 셋은 P/C/F 없음)을 응답에서 진짜 '0' 과 구분한다.
-    # 키/타입 계약은 유지(숫자) — consumer 호환. 식별은 nutrition_available 플래그로.
+    # 영양 '미수집'(농정원 mafra 537: 칼로리는 있고 P/C/F만 0%)을 응답에서 진짜 '0'과 구분한다.
+    # 키/타입 계약은 유지(숫자) - consumer 호환. 식별은 nutrition_available 플래그로.
     def _num(v: object) -> float:
         return float(v) if isinstance(v, (int, float)) else 0.0
     cal, prot, carb, fat = (_num(d.get(k)) for k in ("calories", "protein", "carb", "fat"))
-    macros_known = prot > 0 or carb > 0 or fat > 0   # P/C/F 전부 0 = '없음'이 아니라 '미상'
+    # 매크로 미수집 식별: 칼로리는 있는데(>0) P/C/F가 전부 0이면 물리적 모순 -> 수집 안 된 것(mafra).
+    # 진짜 0인 음식(칼로리도 0)은 미수집으로 보지 않는다 - '실제 0'을 '미상'으로 오판하던 버그 수정.
+    macros_known = not (cal > 0 and prot == 0.0 and carb == 0.0 and fat == 0.0)
     item = {
         "id": str(d.get("id") or d.get("name") or ""),
         "name": d.get("name", ""),
@@ -105,7 +107,7 @@ def to_contract(d: dict) -> dict:
             "carbs": carb,                 # 우리는 'carb', 그쪽은 'carbs'
             "fat": fat,
         },
-        "nutrition_available": macros_known,       # False => P/C/F 미수집(0 은 '모름'). 226 셋 식별·응답표기용
+        "nutrition_available": macros_known,       # False => 칼로리는 있는데 P/C/F 전부 0(미수집). 진짜 0(칼로리도 0)은 True
         "score": s,
         "citation_url": d.get("source_url", ""),  # 보고서 H6(citation 누락) 해소
         "final_score": s,                          # 제철/트렌드 부스팅 전까진 score 와 동일
