@@ -188,7 +188,9 @@ def normalize_mafra(basic: dict, ingredients: list[dict], steps: list[dict]) -> 
         "time_min": _parse_time_min(basic.get("COOKING_TIME")),
         "difficulty": _LEVEL_MAP.get((basic.get("LEVEL_NM") or "").strip(), "medium"),
         "calories": _first_int(basic.get("CALORIE")),
-        "protein": 0.0,  # 기본정보엔 없음 — 영양 결합정보(464) 연결 시 채움
+        # 226 기본정보엔 P/C/F 없음(열량만). 채울 소스가 없어 0 으로 둔다 — 응답은
+        # integration.to_contract 에서 nutrition_available=False 로 '미상'을 식별한다.
+        "protein": 0.0,
         "carb": 0.0,
         "fat": 0.0,
         "source": "mafra",
