@@ -19,6 +19,7 @@ import {
 } from "./chatAdapter";
 import { buildCartResponse, buildRunResponse } from "./mock";
 import type {
+  BudgetReflexionResponse,
   CartRequest,
   CartResponse,
   CoupangSearchCandidate,
@@ -169,5 +170,28 @@ export async function rankProductCandidates(input: {
     preference: input.preference ?? "price",
     recipe_contexts: input.recipeContexts ?? [],
     candidates: input.candidates.slice(0, 5),
+  });
+}
+
+/** 실가격 확정 후 예산 초과 회고 — 더 싼 후보 교체/품목 제거 제안(적용은 UI에서 사용자 클릭). */
+export async function budgetReflexion(input: {
+  budget: number;
+  preference?: DeliveryPreference;
+  items: {
+    ingredient: string;
+    recipeContexts?: string[];
+    selected: { name: string; price: number; url: string };
+    candidates: CoupangSearchCandidate[];
+  }[];
+}): Promise<BudgetReflexionResponse> {
+  return postJson<BudgetReflexionResponse>("/shopping/budget-reflexion", {
+    budget: input.budget,
+    preference: input.preference ?? "price",
+    items: input.items.map((it) => ({
+      ingredient: it.ingredient,
+      recipe_contexts: it.recipeContexts ?? [],
+      selected: it.selected,
+      candidates: it.candidates.slice(0, 5),
+    })),
   });
 }

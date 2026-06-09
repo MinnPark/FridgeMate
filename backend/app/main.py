@@ -9,6 +9,7 @@ from app.tools.shopping_tools import search_coupang_products_tool         # ← 
 from app.llm import get_llm                                              # ← 추가
 from app.prompts.tool_prompts import TOOL_SYSTEM_PROMPT, build_tool_prompt  # ← 추가
 from app.tools.product_rank_tools import rank_product_candidates
+from app.tools.budget_reflexion_tools import build_budget_reflexion       # ← 예산 회고
 from app.v3.graph import compile_graph                                    # ← v3 그래프
 from app.v3.api_adapter import (                                          # ← v3 어댑터
     chat_request_to_v3_state,
@@ -337,4 +338,27 @@ def rank_products(req: ProductRankRequest):
         preference=req.preference,
         recipe_contexts=req.recipe_contexts,
         candidates=[candidate.model_dump() for candidate in req.candidates],
+    )
+
+
+class BudgetReflexionItem(BaseModel):
+    ingredient: str
+    recipe_contexts: list[str] = Field(default_factory=list)
+    selected: dict = Field(default_factory=dict)          # {name, price, url}
+    candidates: list[dict] = Field(default_factory=list)  # [{name, price, url, delivery, isRocket, amountG}]
+
+
+class BudgetReflexionRequest(BaseModel):
+    budget: int = Field(..., examples=[30000])
+    preference: str | None = Field(default=None, examples=["price"])
+    items: list[BudgetReflexionItem]
+
+
+@app.post("/shopping/budget-reflexion")
+def budget_reflexion(req: BudgetReflexionRequest):
+    """실가격 확정 후 예산 초과 회고 — 더 싼 후보 교체(swap) → 그래도 초과면 품목 제거(drop) 제안."""
+    return build_budget_reflexion(
+        budget=req.budget,
+        preference=req.preference,
+        items=[i.model_dump() for i in req.items],
     )
