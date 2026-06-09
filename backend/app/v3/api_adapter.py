@@ -42,8 +42,11 @@ def chat_request_to_v3_state(req: dict[str, Any]) -> dict[str, Any]:
     message = (req.get("message") or "").strip()
     entries = req.get("ingredient_entries") or []
 
-    # fridge_items: 구조화 입력(name) 우선. 없으면 빈 리스트(orchestrator 가 errors 에 기록만).
+    # fridge_items: 구조화 입력(name) 우선. 없으면 ingredients(쉼표 문자열)에서 폴백.
+    # (classic /chat/tool 은 message 기반이라 구조화 입력 없이도 동작했음 — 회귀 방지.)
     fridge_items = [e["name"] for e in entries if e.get("name")]
+    if not fridge_items:
+        fridge_items = _split_csv(req.get("ingredients"))
 
     nutrient_targets = {
         "kcal":    int(req.get("calorie_target_kcal") or 0),
@@ -194,6 +197,10 @@ def v3_state_to_chat_state(state: dict[str, Any], req: dict[str, Any]) -> dict[s
     judge = state.get("judge_result") or {}
     targets = state.get("nutrient_targets") or {}
     suggestion = judge.get("suggestion") or ""
+
+    # today 모드 = "오늘 냉장고 재료만, 장보기 불필요" → 부족재료/장보기 숨김 (classic /chat/tool 정책과 동일).
+    if (req.get("mode") or "today") == "today":
+        missing = []
 
     selected_recipes = _map_selected_recipes(recipes)
 

@@ -39,6 +39,7 @@ class IngredientEntry(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., examples=["냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘"])
+    ingredients: str | None = Field(default=None, examples=["두부, 계란, 애호박"])  # ← v3 fridge_items fallback
     budget_limit: int | None = Field(default=None, examples=[30000])
     ingredient_entries: list[IngredientEntry] = Field(default_factory=list)
     excluded_ingredients: str | None = Field(default=None, examples=["닭가슴살,돼지고기"])

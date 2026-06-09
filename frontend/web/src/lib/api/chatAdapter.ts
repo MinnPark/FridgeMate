@@ -21,6 +21,7 @@ import type {
 // ── 백엔드 /chat 의 요청 모양 ─────────────────────────────────────────────────
 export interface ChatRequest {
   message: string;
+  ingredients?: string | null;                        // ← v3 fridge_items fallback (구조화 entries 없을 때)
   budget_limit?: number | null;
   protein_target_gram?: number | null;
   calorie_target_kcal?: number | null;
@@ -28,6 +29,7 @@ export interface ChatRequest {
   fat_target_gram?: number | null;
   excluded_ingredients?: string | null;
   mode?: string | null;                               // ← 추가
+  people?: number | null;                             // ← v3 인원수 (gap_calc 수량 가중)
   ingredient_entries?: {
     name: string;
     amount: string;
@@ -230,9 +232,13 @@ export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
 
   return {
     message,
+    ingredients:          req.ingredients          || null,  // ← entries 없을 때 fridge_items fallback용
     budget_limit:         req.budgetKrw          || null,
     protein_target_gram:  req.proteinTargetGram   || null,  // 0 → null ← 수정
     calorie_target_kcal:  req.calorieTargetKcal   || null,  // 0 → null ← 수정
+    carbs_target_gram:    req.carbsTargetGram     || null,  // ← v3 영양 advisory
+    fat_target_gram:      req.fatTargetGram       || null,  // ← v3 영양 advisory
+    people:               req.peopleCount         || 1,     // ← v3 gap_calc 수량 가중(누락 시 1인분 고정 버그)
     excluded_ingredients: req.excludedIngredients ?? null,
     mode:                 req.mode                ?? "today",
     ingredient_entries: req.ingredientEntries?.map((e) => ({
