@@ -64,6 +64,13 @@ async def recipe_node(state: FridgeMateState) -> dict:
         recipe_id = slot.get("recipe_id")
         name = slot.get("dish_name") or ""
 
+        # composer 가 동봉한 풀 레시피가 있으면 그대로 사용 — 같은 레시피를 RAG 로 두 번
+        # 검색하던 낭비(슬롯당 HyDE 호출)를 제거한다. (seed/RAG 후보 동일 스키마)
+        embedded = slot.get("recipe")
+        if embedded and embedded.get("name"):
+            recipes.append(_recipe_from_seed(embedded, slot))
+            continue
+
         if recipe_id and recipe_id in _SEED_INDEX:
             recipes.append(_recipe_from_seed(_SEED_INDEX[recipe_id], slot))
             continue

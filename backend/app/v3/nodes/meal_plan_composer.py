@@ -269,6 +269,8 @@ async def meal_plan_composer_node(state: FridgeMateState) -> dict:
             "pantry_coverage": pick["cov"],
             "score": pick["score"],
             "rationale": pick["rationale"],
+            # 이미 RAG/seed 에서 가져온 풀 레시피를 동봉 → recipe_node 가 재검색(resolve_dish) 생략.
+            "recipe": r,
         })
 
     avg_cov = round(sum(s["pantry_coverage"] for s in meal_plan) / len(meal_plan), 3) if meal_plan else 0.0
