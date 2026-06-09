@@ -8,7 +8,7 @@ import {
   openCoupangCartPage,
   openCoupangSearch,
 } from "@/lib/api/coupang";
-import { rankProductCandidates } from "@/lib/api/client";
+import { budgetReflexion, rankProductCandidates } from "@/lib/api/client";
 import {
   executeViaExtension,
   onExtensionReady,
@@ -18,6 +18,8 @@ import {
   type SearchProgress,
 } from "@/lib/api/extensionBridge";
 import type {
+  BudgetReflexionAction,
+  BudgetReflexionResponse,
   CartExecuteItem,
   CartExecuteResponse,
   CoupangSearchCandidate,
@@ -67,6 +69,12 @@ export function CartExecutionCard({
   const [candidatePicker, setCandidatePicker] = useState<string | null>(null);
   // 구매할 재료 선택(체크박스). 기본 전체 해제(사용자가 직접 선택).
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  // 예산 회고(실가격 초과 시 더 싼 후보 교체/품목 제거 제안).
+  const [reflexion, setReflexion] = useState<BudgetReflexionResponse | null>(null);
+  const [reflexionLoading, setReflexionLoading] = useState(false);
+  const [appliedActions, setAppliedActions] = useState<Set<string>>(() => new Set());
+  // 예산 초과 시 추천을 1회 자동 표시(중복/실패 재시도 방지 가드). 적용은 사용자 클릭.
+  const [autoReflexionTried, setAutoReflexionTried] = useState(false);
 
   useEffect(() => {
     const off = onExtensionReady((version) => {
@@ -85,6 +93,9 @@ export function CartExecutionCard({
   const itemKey = shopping.items.map((i) => i.name).join("|");
   useEffect(() => {
     setPicked(new Set());
+    setReflexion(null);
+    setAppliedActions(new Set());
+    setAutoReflexionTried(false);
   }, [itemKey]);
 
   const hasItems = shopping.items.length > 0;
@@ -207,6 +218,70 @@ export function CartExecutionCard({
     );
     setCandidatePicker(null);
   }
+
+  // 예산 회고 요청: 선택된 실가격 상품 + 후보들을 보내 교체/제거 제안을 받는다.
+  async function runBudgetReflexion() {
+    if (shopping.budgetKrw === undefined) return;
+    const items = pickedItems
+      .map((item) => {
+        const r = resultByIngredient.get(item.name);
+        const sel = r?.selected;
+        if (!sel) return null;
+        return {
+          ingredient: item.name,
+          recipeContexts: item.recipeContexts,
+          selected: { name: sel.name, price: sel.price, url: sel.url },
+          candidates: r?.candidates ?? [],
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    if (items.length === 0) return;
+    setReflexionLoading(true);
+    try {
+      const res = await budgetReflexion({
+        budget: shopping.budgetKrw,
+        preference: deliveryPreference,
+        items,
+      });
+      setReflexion(res);
+      setAppliedActions(new Set());
+    } catch {
+      setReflexion(null);
+    } finally {
+      setReflexionLoading(false);
+    }
+  }
+
+  // 제안 적용: swap → 해당 후보 선택, drop → 체크 해제 (기존 함수 재사용). 자동 적용 아님.
+  function applyReflexionAction(action: BudgetReflexionAction) {
+    if (action.type === "swap") {
+      const cand = resultByIngredient
+        .get(action.ingredient)
+        ?.candidates.find((c) => c.url === action.to_url);
+      if (cand) selectCandidate(action.ingredient, cand);
+    } else if (picked.has(action.ingredient)) {
+      togglePick(action.ingredient); // 체크 해제
+    }
+    setAppliedActions((prev) =>
+      new Set(prev).add(`${action.type}:${action.ingredient}`),
+    );
+  }
+
+  // 예산 초과 + 실가격 확정 시 추천을 1회 자동 표시(적용은 사용자 클릭). 실패해도 재시도 안 함.
+  useEffect(() => {
+    if (
+      isOverBudget &&
+      hasConfirmedPrices &&
+      !autoReflexionTried &&
+      !reflexionLoading &&
+      !reflexion
+    ) {
+      setAutoReflexionTried(true);
+      void runBudgetReflexion();
+    }
+    // runBudgetReflexion 은 매 렌더 새로 생성되므로 deps 에서 제외(가드로 루프 방지).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOverBudget, hasConfirmedPrices, autoReflexionTried, reflexionLoading, reflexion]);
 
   const step3State: StepState =
     phase === "running" ? "running" : phase === "result" ? "done" : "pending";
@@ -643,12 +718,83 @@ export function CartExecutionCard({
             <SmallBtn onClick={() => openCoupangCartPage()}>↗ 열기</SmallBtn>
           </div>
 
-          {/* 예산 초과 인라인 배너: 왼쪽 체크 해제로 조정(실시간 갱신) */}
+          {/* 예산 초과: 인라인 배너 + 예산 회고(더 싼 후보 교체 / 품목 제거 제안) */}
           {isOverBudget && (
-            <div className="mt-2 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
-              ⚠️ 예산 {formatKRW(shopping.budgetKrw!)} 대비{" "}
-              <b>{formatKRW(overBudgetAmount)}</b> 초과예요. 왼쪽에서 담지 않을
-              품목의 체크를 해제해 조정하세요.
+            <div className="mt-2 space-y-2">
+              <div className="rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200">
+                ⚠️ 예산 {formatKRW(shopping.budgetKrw!)} 대비{" "}
+                <b>{formatKRW(overBudgetAmount)}</b> 초과예요. 아래 예산 회고 제안을
+                확인하거나 왼쪽에서 직접 체크를 해제하세요.
+              </div>
+              {/* 추천은 자동 표시. 가격이 아직 안 잡혔거나 다시 받고 싶을 때만 버튼 사용. */}
+              {(reflexionLoading || !hasConfirmedPrices || reflexion) && (
+                <button
+                  type="button"
+                  onClick={runBudgetReflexion}
+                  disabled={reflexionLoading || !hasConfirmedPrices}
+                  className="w-full rounded-lg border border-amber-300/40 bg-amber-400/10 py-1.5 text-[11px] font-semibold text-amber-200 transition hover:bg-amber-400/20 disabled:opacity-50"
+                >
+                  {reflexionLoading
+                    ? "회고 중…"
+                    : reflexion
+                      ? "🔄 예산 회고 다시 받기"
+                      : "💡 예산 회고 받기"}
+                </button>
+              )}
+              {reflexion && (
+                <div className="rounded-xl border border-amber-300/30 bg-amber-400/5 px-3 py-2 text-xs">
+                  <p className="leading-relaxed text-amber-100/90">
+                    {reflexion.reflection}
+                  </p>
+                  <p className="mt-1 text-[11px] text-white/45">
+                    예상 합계 {formatKRW(reflexion.projected_total)} ·{" "}
+                    {reflexion.within_after ? "예산 이내 ✓" : "여전히 초과"} ·{" "}
+                    {reflexion.used_llm ? "LLM 회고" : "규칙 회고"}
+                  </p>
+                  {reflexion.actions.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {reflexion.actions.map((a) => {
+                        const applied = appliedActions.has(
+                          `${a.type}:${a.ingredient}`,
+                        );
+                        return (
+                          <li
+                            key={`${a.type}:${a.ingredient}`}
+                            className="flex items-center gap-2"
+                          >
+                            <span
+                              className={[
+                                "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                                a.type === "swap"
+                                  ? "bg-sky-400/15 text-sky-300"
+                                  : "bg-red-500/15 text-red-300",
+                              ].join(" ")}
+                            >
+                              {a.type === "swap" ? "교체" : "제거"}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-white/70">
+                              {a.ingredient}
+                              {a.type === "swap"
+                                ? ` → ${a.to_name} (${formatKRW(a.to_price ?? 0)})`
+                                : a.reason
+                                  ? ` · ${a.reason}`
+                                  : ""}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => applyReflexionAction(a)}
+                              disabled={applied}
+                              className="shrink-0 rounded-md border border-white/15 px-1.5 py-0.5 text-[10px] text-white/70 transition hover:bg-white/10 disabled:opacity-40"
+                            >
+                              {applied ? "적용됨" : "적용"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

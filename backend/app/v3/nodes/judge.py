@@ -47,15 +47,24 @@ async def judge_node(state: FridgeMateState) -> dict:
     nutrition_score = compute_nutrition_score(recipes, targets)
     nutrition_ok = nutrition_score >= PASS_NUTRITION_SCORE
 
+    # ── FAIL(=Reflexion 발동) 사유 = 제약 한정 ────────────────────────────────
+    # 영양·재료충당·예산은 모두 advisory(점수 계산·화면 표시만, FAIL 아님).
+    #  - 영양/재료충당: seed 로는 목표를 못 맞춰 매 패스 RAG 재검색이 반복되던 문제로 제외(이전 변경).
+    #  - 예산: v3 의 목 가격(MOCK_PACKAGE_PRICE) 기반이라 사용자에게 안 닿는 헛루프였다.
+    #    실제 예산 회고는 실가격이 확정되는 프론트(CartExecutionCard → /shopping/budget-reflexion)
+    #    한 곳에서만 수행한다. 따라서 그래프 안에서는 예산으로 루프를 돌지 않는다.
+    # issues 에는 라우팅 사유(제약→meal_plan_composer)만 담는다.
     issues: list[str] = []
     if not constraint_ok:
         issues.extend(violations)
+
+    advisory: list[str] = []        # 표시용(루프 비유발)
     if not nutrition_ok:
-        issues.append(f"영양 목표 미달: {nutrition_score:.0%} (목표 {PASS_NUTRITION_SCORE:.0%})")
+        advisory.append(f"영양 목표 미달: {nutrition_score:.0%} (목표 {PASS_NUTRITION_SCORE:.0%})")
     if coverage < PASS_INGREDIENT_COVERAGE:
-        issues.append(f"재료 충분도 낮음: {coverage:.0%}")
+        advisory.append(f"재료 충분도 낮음: {coverage:.0%}")
     if not budget_ok:
-        issues.append("예산 초과 — 대체재 탐색 권장")
+        advisory.append("예산 초과(추정) — 실제 조정은 장보기 단계에서")
 
     score = (
         nutrition_score * 0.30
@@ -64,12 +73,13 @@ async def judge_node(state: FridgeMateState) -> dict:
         + schedule_fit * 0.10
         + (1.0 if constraint_ok else 0.0) * 0.10
     )
-    passed = (
-        nutrition_ok and budget_ok and constraint_ok
-        and coverage >= PASS_INGREDIENT_COVERAGE
-    )
+    # PASS 게이트: 제약만 (영양·재료충당·예산은 advisory).
+    passed = constraint_ok
 
-    suggestion = await _build_suggestion(issues, recipes, passed)
+    # suggestion 은 advisory 까지 보고 조언 — 표시용일 뿐 라우팅(reflect_target_router)은 issues 만 본다.
+    # 비용 가드: Reflexion 실패 패스(매 루프)마다 느린 opus 를 부르면 4회×~4초가 든다.
+    # LLM 조언은 최종 PASS 일 때만 생성하고, 실패/루프 중엔 휴리스틱 한 줄로 즉답한다.
+    suggestion = await _build_suggestion(issues + advisory, recipes, passed, use_llm=passed)
 
     return {
         "judge_result": {
@@ -83,6 +93,7 @@ async def judge_node(state: FridgeMateState) -> dict:
                 "constraint":   1.0 if constraint_ok else 0.0,
             },
             "issues": issues,
+            "advisory": advisory,   # 영양·재료충당(표시용, Reflexion 비유발)
             "suggestion": suggestion,
         },
         "kpi_log": {
@@ -95,7 +106,9 @@ async def judge_node(state: FridgeMateState) -> dict:
     }
 
 
-async def _build_suggestion(issues: list[str], recipes: list[dict], passed: bool) -> str:
+async def _build_suggestion(
+    issues: list[str], recipes: list[dict], passed: bool, *, use_llm: bool = True
+) -> str:
     if passed and not issues:
         offline = "영양·예산·재료 모두 OK — 바로 만들어요!"
     elif any("영양" in i for i in issues):
@@ -106,6 +119,10 @@ async def _build_suggestion(issues: list[str], recipes: list[dict], passed: bool
         offline = "냉장고 재료가 부족해요. 충당률 높은 다른 요리로 식단을 조정하거나 부족 재료만 사세요."
     else:
         offline = "제약 조건이 충돌해요. exclude 항목을 다시 확인해주세요."
+
+    # 루프/실패 패스에서는 LLM 생략(즉답). 최종 표시 시점에만 opus 로 다듬는다.
+    if not use_llm:
+        return offline
 
     dish_names = ", ".join(r.get("dish_name", "") for r in recipes[:4])
     user_msg = json.dumps(

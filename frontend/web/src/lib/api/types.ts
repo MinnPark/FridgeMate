@@ -292,3 +292,27 @@ export interface ProductRankResponse {
   provider: string;
   used_llm: boolean;
 }
+
+// 예산 회고(실가격 확정 후 초과 시): 더 싼 후보 교체(swap) → 그래도 초과면 품목 제거(drop) 제안.
+export interface BudgetReflexionAction {
+  type: "swap" | "drop";
+  ingredient: string;
+  // swap 일 때만:
+  to_url?: string;
+  to_name?: string;
+  to_price?: number;
+  // drop 일 때만:
+  reason?: string;
+}
+
+export interface BudgetReflexionResponse {
+  over_budget: boolean;
+  current_total: number;
+  budget: number;
+  projected_total: number;
+  within_after: boolean;
+  reflection: string;
+  actions: BudgetReflexionAction[];
+  used_llm: boolean;
+  provider: string;
+}

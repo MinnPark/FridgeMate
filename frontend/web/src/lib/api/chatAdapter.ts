@@ -21,6 +21,7 @@ import type {
 // ── 백엔드 /chat 의 요청 모양 ─────────────────────────────────────────────────
 export interface ChatRequest {
   message: string;
+  ingredients?: string | null;                        // ← v3 fridge_items fallback (구조화 entries 없을 때)
   budget_limit?: number | null;
   protein_target_gram?: number | null;
   calorie_target_kcal?: number | null;
@@ -28,6 +29,7 @@ export interface ChatRequest {
   fat_target_gram?: number | null;
   excluded_ingredients?: string | null;
   mode?: string | null;                               // ← 추가
+  people?: number | null;                             // ← v3 인원수 (gap_calc 수량 가중)
   ingredient_entries?: {
     name: string;
     amount: string;
@@ -189,9 +191,9 @@ function buildModeMessage(mode: string | undefined, base: string): string {
 
 // ── API 엔드포인트 결정 ────────────────────────────────────────────────────────
 export function getApiEndpoint(_mode: string | undefined): string {
-  // 모든 모드 → /chat/tool (Tool Calling 엔드포인트)
-  // LLM이 mode 메시지 보고 tool 호출 여부 스스로 판단
-  return "/chat/tool";
+  // v3 그래프로 전환됨 (점진 전환). 롤백하려면 "/chat/tool" 로 되돌리면 classic 복귀.
+  // 백엔드 어댑터가 v3 응답을 ChatState(snake) 형태로 변환하므로 매퍼는 무수정.
+  return "/chat/v3";
 }
 
 // ── 요청 매퍼: 구조화 입력 → ChatRequest ─────────────────────────────────────
@@ -230,9 +232,13 @@ export function mapRequestToChat(req: FridgeMateRequest): ChatRequest {
 
   return {
     message,
+    ingredients:          req.ingredients          || null,  // ← entries 없을 때 fridge_items fallback용
     budget_limit:         req.budgetKrw          || null,
     protein_target_gram:  req.proteinTargetGram   || null,  // 0 → null ← 수정
     calorie_target_kcal:  req.calorieTargetKcal   || null,  // 0 → null ← 수정
+    carbs_target_gram:    req.carbsTargetGram     || null,  // ← v3 영양 advisory
+    fat_target_gram:      req.fatTargetGram       || null,  // ← v3 영양 advisory
+    people:               req.peopleCount         || 1,     // ← v3 gap_calc 수량 가중(누락 시 1인분 고정 버그)
     excluded_ingredients: req.excludedIngredients ?? null,
     mode:                 req.mode                ?? "today",
     ingredient_entries: req.ingredientEntries?.map((e) => ({

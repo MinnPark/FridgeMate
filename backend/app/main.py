@@ -9,6 +9,12 @@ from app.tools.shopping_tools import search_coupang_products_tool         # ← 
 from app.llm import get_llm                                              # ← 추가
 from app.prompts.tool_prompts import TOOL_SYSTEM_PROMPT, build_tool_prompt  # ← 추가
 from app.tools.product_rank_tools import rank_product_candidates
+from app.tools.budget_reflexion_tools import build_budget_reflexion       # ← 예산 회고
+from app.v3.graph import compile_graph                                    # ← v3 그래프
+from app.v3.api_adapter import (                                          # ← v3 어댑터
+    chat_request_to_v3_state,
+    v3_state_to_chat_state,
+)
 
 
 app = FastAPI(title="FridgeMate AI")
@@ -21,6 +27,7 @@ app.add_middleware(
 
 graph      = build_graph()                                               # 기존 /chat 전용
 graph_tool = build_tool_graph()                                          # ← /chat/tool 전용
+graph_v3   = compile_graph()                                             # ← /chat/v3 전용 (async + checkpointer)
 
 
 class IngredientEntry(BaseModel):
@@ -32,10 +39,12 @@ class IngredientEntry(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., examples=["냉장고에 두부, 계란, 애호박이 있어. 고단백 한식 식단 짜줘"])
+    ingredients: str | None = Field(default=None, examples=["두부, 계란, 애호박"])  # ← v3 fridge_items fallback
     budget_limit: int | None = Field(default=None, examples=[30000])
     ingredient_entries: list[IngredientEntry] = Field(default_factory=list)
     excluded_ingredients: str | None = Field(default=None, examples=["닭가슴살,돼지고기"])
     mode: str | None = Field(default="today", examples=["today", "weekend", "mealprep", "goal"])  # ← 추가
+    people: int = Field(default=1, examples=[1, 2, 4])               # ← v3 인원수 (gap_calc 가중)
 
     # 영양 목표
     protein_target_gram:  int | None = Field(default=None, examples=[120])
@@ -302,6 +311,25 @@ def chat_with_tools(req: ChatRequest):
     }
 
 
+@app.post("/chat/v3")
+async def chat_v3(req: ChatRequest):
+    """
+    /chat/v3 — v3 그래프 엔드포인트 (점진 전환용)
+
+    classic(/chat, /chat/tool)은 그대로 두고 v3 그래프를 병행 운영한다.
+    어댑터가 ChatRequest ↔ v3 state 를 양방향 변환하므로 응답은 기존 ChatState(snake)
+    형태로 나가 프론트(chatAdapter.ts)가 무수정으로 소비한다.
+
+    흐름:
+      orchestrator → pantry → intake → meal_plan_composer → recipe
+        → gap_calc → shopping_rank → judge ─[FAIL,<3]→ reflect → … / ─[PASS]→ cart → cooking_guide
+    """
+    v3_input = chat_request_to_v3_state(req.model_dump())
+    config = {"configurable": {"thread_id": v3_input["thread_id"]}}
+    result = await graph_v3.ainvoke(v3_input, config=config)
+    return v3_state_to_chat_state(result, req.model_dump())
+
+
 @app.post("/shopping/rank-products")
 def rank_products(req: ProductRankRequest):
     return rank_product_candidates(
@@ -311,4 +339,27 @@ def rank_products(req: ProductRankRequest):
         preference=req.preference,
         recipe_contexts=req.recipe_contexts,
         candidates=[candidate.model_dump() for candidate in req.candidates],
+    )
+
+
+class BudgetReflexionItem(BaseModel):
+    ingredient: str
+    recipe_contexts: list[str] = Field(default_factory=list)
+    selected: dict = Field(default_factory=dict)          # {name, price, url}
+    candidates: list[dict] = Field(default_factory=list)  # [{name, price, url, delivery, isRocket, amountG}]
+
+
+class BudgetReflexionRequest(BaseModel):
+    budget: int = Field(..., examples=[30000])
+    preference: str | None = Field(default=None, examples=["price"])
+    items: list[BudgetReflexionItem]
+
+
+@app.post("/shopping/budget-reflexion")
+def budget_reflexion(req: BudgetReflexionRequest):
+    """실가격 확정 후 예산 초과 회고 — 더 싼 후보 교체(swap) → 그래도 초과면 품목 제거(drop) 제안."""
+    return build_budget_reflexion(
+        budget=req.budget,
+        preference=req.preference,
+        items=[i.model_dump() for i in req.items],
     )
