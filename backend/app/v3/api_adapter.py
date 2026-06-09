@@ -31,6 +31,19 @@ def _split_csv(text: str | None) -> list[str]:
     return [t.strip() for t in text.split(",") if t.strip()]
 
 
+def _entry_to_text(entry: dict[str, Any]) -> str:
+    """구조화 재료 → pantry parser 입력 문자열. 수량이 숫자로 시작할 때만 "이름 수량" 결합.
+
+    예: {"name":"두부","amount":"1모"} → "두부 1모" (parser가 qty=1, unit=모 추출)
+        {"name":"두부","amount":"약간"} → "두부"   (비수치 amount는 이름 오염 방지로 제외)
+    """
+    name = (entry.get("name") or "").strip()
+    amount = (entry.get("amount") or "").strip()
+    if amount and amount[0].isdigit():
+        return f"{name} {amount}".strip()
+    return name
+
+
 # ── (1) 입력 어댑터 ──────────────────────────────────────────────────────────
 def chat_request_to_v3_state(req: dict[str, Any]) -> dict[str, Any]:
     """classic ChatRequest(model_dump dict) → v3 FridgeMateState 초기 입력.
@@ -42,9 +55,11 @@ def chat_request_to_v3_state(req: dict[str, Any]) -> dict[str, Any]:
     message = (req.get("message") or "").strip()
     entries = req.get("ingredient_entries") or []
 
-    # fridge_items: 구조화 입력(name) 우선. 없으면 ingredients(쉼표 문자열)에서 폴백.
-    # (classic /chat/tool 은 message 기반이라 구조화 입력 없이도 동작했음 — 회귀 방지.)
-    fridge_items = [e["name"] for e in entries if e.get("name")]
+    # fridge_items: 구조화 입력은 "이름 수량" 형태로 넘겨 pantry parser가 qty/unit을 살린다.
+    # (name만 넘기면 qty=None → compute_missing이 재고 0으로 취급해 보유분이 부족계산에서 유실됨.)
+    # 수량이 숫자로 시작할 때만 결합 — "약간" 등 비수치 amount가 이름에 흡수되는 오염 방지.
+    # entries 가 아예 없으면 ingredients(쉼표 문자열)에서 폴백(classic 회귀 방지).
+    fridge_items = [_entry_to_text(e) for e in entries if e.get("name")]
     if not fridge_items:
         fridge_items = _split_csv(req.get("ingredients"))
 
