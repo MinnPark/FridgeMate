@@ -189,9 +189,9 @@ function buildModeMessage(mode: string | undefined, base: string): string {
 
 // ── API 엔드포인트 결정 ────────────────────────────────────────────────────────
 export function getApiEndpoint(_mode: string | undefined): string {
-  // 모든 모드 → /chat/tool (Tool Calling 엔드포인트)
-  // LLM이 mode 메시지 보고 tool 호출 여부 스스로 판단
-  return "/chat/tool";
+  // v3 그래프로 전환됨 (점진 전환). 롤백하려면 "/chat/tool" 로 되돌리면 classic 복귀.
+  // 백엔드 어댑터가 v3 응답을 ChatState(snake) 형태로 변환하므로 매퍼는 무수정.
+  return "/chat/v3";
 }
 
 // ── 요청 매퍼: 구조화 입력 → ChatRequest ─────────────────────────────────────
